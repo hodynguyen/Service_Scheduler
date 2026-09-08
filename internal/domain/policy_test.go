@@ -6,21 +6,23 @@ import (
 )
 
 func TestQualification_AC08_TechnicianWithoutRequiredSkillIsFiltered(t *testing.T) {
-	got := QualifiedTechnicians(allTechs, skillAlignment)
+	techs := schedule(nil, nil).Technicians
+	got := QualifiedTechnicians(techs, skillAlignment)
 	if len(got) != 1 || got[0].ID != techAn.ID {
 		t.Fatalf("only An holds WHEEL_ALIGNMENT; got %v", got)
 	}
-	if len(QualifiedTechnicians(allTechs, "skill-does-not-exist")) != 0 {
+	if len(QualifiedTechnicians(techs, "skill-does-not-exist")) != 0 {
 		t.Fatal("unknown skill qualifies nobody")
 	}
 }
 
 func TestQualification_AC09_BayOfWrongTypeIsFiltered(t *testing.T) {
-	got := QualifiedBays(allBays, BayTypeEV)
+	bays := schedule(nil, nil).Bays
+	got := QualifiedBays(bays, BayTypeEV)
 	if len(got) != 1 || got[0].ID != bayEV.ID {
 		t.Fatalf("only the EV bay qualifies for EV work; got %v", got)
 	}
-	if n := len(QualifiedBays(allBays, BayTypeGeneral)); n != 2 {
+	if n := len(QualifiedBays(bays, BayTypeGeneral)); n != 2 {
 		t.Fatalf("two GENERAL bays expected, got %d", n)
 	}
 }

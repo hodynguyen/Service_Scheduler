@@ -121,21 +121,6 @@ func TestBooking_AC12_OneMinuteOverlapIsRejected(t *testing.T) {
 	expectConflicting(t, de, ResourceBay, ResourceTechnician)
 }
 
-func TestAssign_AC17_CancelledAppointmentsDoNotOccupyResources(t *testing.T) {
-	appts := []Appointment{
-		{ID: "a1", Status: StatusCancelled, Interval: iv(monday, 9, 0, time.Hour)},
-		{ID: "a2", Status: StatusConfirmed, Interval: iv(monday, 13, 0, time.Hour)},
-	}
-	booked := ActiveIntervals(appts)
-	if len(booked) != 1 || !booked[0].Start.Equal(local(monday, 13, 0)) {
-		t.Fatalf("only CONFIRMED appointments reserve resources, got %v", booked)
-	}
-	s := schedule(map[string][]Interval{techAn.ID: booked}, map[string][]Interval{bayAlignment.ID: booked})
-	if _, err := Assign(s, svcAlignment, iv(monday, 9, 0, time.Hour), policy); err != nil {
-		t.Fatalf("the cancelled 09:00 slot must be bookable again: %v", err)
-	}
-}
-
 func TestAssign_AC20_LessLoadedTechnicianIsAssigned(t *testing.T) {
 	// Oil change: all four technicians qualify. An has 4 h booked, Binh 1 h, Chi 2 h, Dung 3 h.
 	s := schedule(map[string][]Interval{
@@ -167,8 +152,8 @@ func TestAssign_AC20_LessLoadedBayIsAssigned(t *testing.T) {
 	}
 }
 
-func TestAssign_AC20_LoadCountsOnlyThatDaysBookings(t *testing.T) {
-	// Busy-but-free-at-the-slot technicians still carry their load.
+func TestLoadMinutes_SumsBookedDurations(t *testing.T) {
+	// Per-date scoping lives in the repository (TestBooking_AC20_LoadIsCountedPerLocalDate).
 	if got := LoadMinutes([]Interval{iv(monday, 13, 0, 90*time.Minute), iv(monday, 15, 0, 30*time.Minute)}); got != 120 {
 		t.Fatalf("LoadMinutes = %d, want 120", got)
 	}

@@ -28,17 +28,6 @@ type Assignment struct {
 	Bay        Bay
 }
 
-// ActiveIntervals returns the intervals of CONFIRMED appointments only.
-func ActiveIntervals(appts []Appointment) []Interval {
-	out := make([]Interval, 0, len(appts))
-	for _, a := range appts {
-		if a.Status == StatusConfirmed {
-			out = append(out, a.Interval)
-		}
-	}
-	return out
-}
-
 // LoadMinutes sums the booked minutes (BR-6 "assigned minutes on that date").
 func LoadMinutes(booked []Interval) int {
 	var total int
@@ -63,8 +52,8 @@ func Assign(s DaySchedule, st ServiceType, iv Interval, policy AssignmentPolicy)
 
 	techByID := map[string]Technician{}
 	var techCandidates []Candidate
-	for _, ts := range s.Technicians {
-		if !ts.HasSkill(st.RequiredSkillID) || OverlapsAny(iv, ts.Booked) {
+	for _, ts := range QualifiedTechnicians(s.Technicians, st.RequiredSkillID) {
+		if OverlapsAny(iv, ts.Booked) {
 			continue
 		}
 		techByID[ts.ID] = ts.Technician
@@ -73,8 +62,8 @@ func Assign(s DaySchedule, st ServiceType, iv Interval, policy AssignmentPolicy)
 
 	bayByID := map[string]Bay{}
 	var bayCandidates []Candidate
-	for _, bs := range s.Bays {
-		if bs.Type != st.RequiredBayType || OverlapsAny(iv, bs.Booked) {
+	for _, bs := range QualifiedBays(s.Bays, st.RequiredBayType) {
+		if OverlapsAny(iv, bs.Booked) {
 			continue
 		}
 		bayByID[bs.ID] = bs.Bay
