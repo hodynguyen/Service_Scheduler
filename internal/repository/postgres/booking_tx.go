@@ -8,6 +8,9 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/hodynguyen/service-scheduler/internal/domain"
 	"github.com/hodynguyen/service-scheduler/internal/service"
@@ -21,6 +24,8 @@ type bookingTx struct {
 var _ service.BookingTx = (*bookingTx)(nil)
 
 func (b *bookingTx) DaySchedule(ctx context.Context, q service.ScheduleQuery) (domain.DaySchedule, error) {
+	ctx, span := tracer.Start(ctx, "repository.DaySchedule")
+	defer span.End()
 	return daySchedule(ctx, b.tx, q)
 }
 
@@ -32,6 +37,10 @@ func (b *bookingTx) Appointment(ctx context.Context, id string) (domain.Appointm
 // violation leaves the outer transaction usable for a retry or for the
 // idempotency record.
 func (b *bookingTx) InsertAppointment(ctx context.Context, a service.NewAppointment) (domain.Appointment, error) {
+	ctx, span := tracer.Start(ctx, "repository.InsertAppointment", trace.WithAttributes(
+		attribute.String("technician.id", a.TechnicianID), attribute.String("bay.id", a.BayID)))
+	defer span.End()
+
 	sp, err := b.tx.Begin(ctx) // nested Begin == SAVEPOINT in pgx
 	if err != nil {
 		return domain.Appointment{}, fmt.Errorf("savepoint: %w", err)
@@ -45,7 +54,13 @@ func (b *bookingTx) InsertAppointment(ctx context.Context, a service.NewAppointm
 	).Scan(&id)
 	if err != nil {
 		_ = sp.Rollback(ctx)
-		return domain.Appointment{}, mapInsertError(err)
+		err = mapInsertError(err)
+		if errors.Is(err, service.ErrLostRace) {
+			span.SetAttributes(attribute.String("outcome", "lost_race"))
+		} else {
+			span.SetStatus(codes.Error, err.Error())
+		}
+		return domain.Appointment{}, err
 	}
 	if err := sp.Commit(ctx); err != nil {
 		return domain.Appointment{}, fmt.Errorf("release savepoint: %w", err)

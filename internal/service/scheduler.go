@@ -8,6 +8,10 @@ import (
 	"fmt"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/hodynguyen/service-scheduler/internal/domain"
 )
 
@@ -21,6 +25,7 @@ type Scheduler struct {
 	now         func() time.Time
 	granularity time.Duration
 	maxAttempts int
+	metrics     Instrumentation
 }
 
 // Option configures a Scheduler.
@@ -46,6 +51,7 @@ func New(repo Repository, opts ...Option) *Scheduler {
 		now:         time.Now,
 		granularity: domain.DefaultSlotGranularity,
 		maxAttempts: 3,
+		metrics:     noopInstrumentation{},
 	}
 	for _, o := range opts {
 		o(s)
@@ -71,6 +77,12 @@ type AvailabilityResult struct {
 
 // Availability returns the bookable start times for a service type on a date.
 func (s *Scheduler) Availability(ctx context.Context, q AvailabilityQuery) (AvailabilityResult, error) {
+	ctx, span := tracer.Start(ctx, "scheduler.Availability", trace.WithAttributes(
+		attribute.String("dealership.id", q.DealershipID),
+		attribute.String("service_type.id", q.ServiceTypeID),
+		attribute.String("date", q.Date)))
+	defer span.End()
+
 	date, err := domain.ParseDate(q.Date)
 	if err != nil {
 		return AvailabilityResult{}, domain.NewError(domain.CodeValidationError, "%v", err)
@@ -125,7 +137,28 @@ func (r BookRequest) fingerprint() string {
 // why not. Reference lookups and time validation happen before the
 // transaction; candidate selection, the insert and the idempotency record
 // happen inside it.
-func (s *Scheduler) Book(ctx context.Context, req BookRequest) (domain.Appointment, error) {
+func (s *Scheduler) Book(ctx context.Context, req BookRequest) (appt domain.Appointment, err error) {
+	ctx, span := tracer.Start(ctx, "scheduler.Book", trace.WithAttributes(
+		attribute.String("dealership.id", req.DealershipID),
+		attribute.String("vehicle.id", req.VehicleID),
+		attribute.String("service_type.id", req.ServiceTypeID),
+		attribute.Bool("idempotency_key.present", req.IdempotencyKey != "")))
+	defer span.End()
+	started := time.Now()
+	s.metrics.BookingStarted(ctx)
+	defer func() {
+		s.metrics.BookingFinished(ctx, err, time.Since(started))
+		if err != nil {
+			if de, ok := domain.AsError(err); ok {
+				span.SetAttributes(attribute.String("booking.outcome", string(de.Code)))
+			} else {
+				span.SetStatus(codes.Error, err.Error())
+			}
+			return
+		}
+		span.SetAttributes(attribute.String("booking.outcome", "CONFIRMED"), attribute.String("appointment.id", appt.ID))
+	}()
+
 	dealership, err := s.repo.Dealership(ctx, req.DealershipID)
 	if err != nil {
 		return domain.Appointment{}, err
@@ -156,10 +189,7 @@ func (s *Scheduler) Book(ctx context.Context, req BookRequest) (domain.Appointme
 		Interval:      iv,
 	}
 
-	var (
-		appt    domain.Appointment
-		outcome error // a *domain.Error rejection that must still commit the transaction
-	)
+	var outcome error // a *domain.Error rejection that must still commit the transaction
 	err = s.repo.InTx(ctx, func(tx BookingTx) error {
 		if req.IdempotencyKey != "" {
 			if err := tx.LockIdempotencyKey(ctx, req.DealershipID, req.IdempotencyKey); err != nil {
@@ -241,7 +271,7 @@ func (s *Scheduler) assignAndInsert(ctx context.Context, tx BookingTx, q Schedul
 		if err != nil {
 			return domain.Appointment{}, err
 		}
-		assignment, err := domain.Assign(schedule, st, na.Interval, s.policy)
+		assignment, err := s.assign(ctx, attempt, schedule, st, na.Interval)
 		if err != nil {
 			return domain.Appointment{}, err
 		}
@@ -265,4 +295,21 @@ func (s *Scheduler) assignAndInsert(ctx context.Context, tx BookingTx, q Schedul
 // GetAppointment implements FR-3.
 func (s *Scheduler) GetAppointment(ctx context.Context, id string) (domain.Appointment, error) {
 	return s.repo.Appointment(ctx, id)
+}
+
+// assign runs the policy inside its own span so selection time and outcome
+// are visible per attempt.
+func (s *Scheduler) assign(ctx context.Context, attempt int, schedule domain.DaySchedule, st domain.ServiceType, iv domain.Interval) (domain.Assignment, error) {
+	_, span := tracer.Start(ctx, "policy.Assign", trace.WithAttributes(
+		attribute.Int("attempt", attempt+1),
+		attribute.Int("candidates.technicians", len(schedule.Technicians)),
+		attribute.Int("candidates.bays", len(schedule.Bays))))
+	defer span.End()
+	assignment, err := domain.Assign(schedule, st, iv, s.policy)
+	if err != nil {
+		span.SetAttributes(attribute.String("outcome", string(domain.CodeOf(err))))
+		return domain.Assignment{}, err
+	}
+	span.SetAttributes(attribute.String("technician.id", assignment.Technician.ID), attribute.String("bay.id", assignment.Bay.ID))
+	return assignment, nil
 }

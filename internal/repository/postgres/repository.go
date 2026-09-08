@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"go.opentelemetry.io/otel"
 
 	"github.com/hodynguyen/service-scheduler/internal/domain"
 	"github.com/hodynguyen/service-scheduler/internal/service"
@@ -25,6 +26,8 @@ type Repository struct {
 
 // New wraps a pool.
 func New(pool *pgxpool.Pool) *Repository { return &Repository{pool: pool} }
+
+var tracer = otel.Tracer("github.com/hodynguyen/service-scheduler/internal/repository/postgres")
 
 var _ service.Repository = (*Repository)(nil)
 
@@ -198,6 +201,8 @@ func appointment(ctx context.Context, q querier, id string) (domain.Appointment,
 // plus the CONFIRMED intervals starting within the day. No qualification or
 // overlap logic here — the domain decides.
 func (r *Repository) DaySchedule(ctx context.Context, q service.ScheduleQuery) (domain.DaySchedule, error) {
+	ctx, span := tracer.Start(ctx, "repository.DaySchedule")
+	defer span.End()
 	return daySchedule(ctx, r.pool, q)
 }
 
@@ -285,6 +290,8 @@ func daySchedule(ctx context.Context, q querier, sq service.ScheduleQuery) (doma
 
 // InTx runs fn in a READ COMMITTED transaction.
 func (r *Repository) InTx(ctx context.Context, fn func(tx service.BookingTx) error) error {
+	ctx, span := tracer.Start(ctx, "repository.Transaction")
+	defer span.End()
 	return pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error {
 		return fn(&bookingTx{tx: tx})
 	})
