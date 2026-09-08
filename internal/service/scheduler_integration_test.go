@@ -677,3 +677,47 @@ func TestAvailability_InvalidDateAndUnknownIdsAreDomainErrors(t *testing.T) {
 		t.Fatal("unreachable")
 	}
 }
+
+func TestBooking_ConcurrentRequestsUseEveryFreeResourceWhenMoreThanThreeQualify(t *testing.T) {
+	h := newHarness(t)
+	// Four GENERAL_SERVICE technicians and, with two extra bays, four GENERAL bays.
+	// Four concurrent oil changes must ALL succeed. A fixed retry budget of three
+	// would reject the last loser although a bay and a technician are still free,
+	// because the deterministic policy makes every loser pick the same next candidate.
+	for i, name := range []string{"Bay 3", "Bay 4"} {
+		if _, err := h.pool.Exec(h.ctx, `INSERT INTO service_bay (id, dealership_id, name, bay_type) VALUES ($1, $2, $3, 'GENERAL')`,
+			fmt.Sprintf("40000000-0000-4000-8000-0000000000e%d", i), postgres.SeedDealershipID, name); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() {
+		pgtest.Reset(t, h.pool)
+		_, _ = h.pool.Exec(h.ctx, `DELETE FROM service_bay WHERE id::text LIKE '40000000-0000-4000-8000-0000000000e%'`)
+	})
+	vehicles := []string{postgres.SeedVehicleCamryID, postgres.SeedVehicleVF8ID, postgres.SeedVehicleCRVID, postgres.SeedVehicleRangerID}
+	for run := 0; run < 5; run++ {
+		pgtest.Reset(t, h.pool)
+		var wg sync.WaitGroup
+		results := make([]error, len(vehicles))
+		start := make(chan struct{})
+		for i, v := range vehicles {
+			wg.Add(1)
+			go func(i int, v string) {
+				defer wg.Done()
+				<-start
+				_, results[i] = h.book(v, postgres.SeedServiceTypeOilChangeID, local(monday, 9, 0))
+			}(i, v)
+		}
+		close(start)
+		wg.Wait()
+		for i, err := range results {
+			if err != nil {
+				t.Fatalf("run %d request %d: spurious rejection while resources were free: %v", run, i, err)
+			}
+		}
+		if h.confirmedCount(t) != 4 {
+			t.Fatalf("run %d: confirmed = %d, want 4", run, h.confirmedCount(t))
+		}
+		assertNoInvariantViolated(t, h.pool)
+	}
+}
