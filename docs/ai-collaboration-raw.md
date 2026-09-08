@@ -64,3 +64,48 @@ Written by the AI agent immediately after each phase. Unedited. Accuracy over to
 - Anything I got wrong first and had to correct:
   - go.mod was written as `go 1.24`; `go get testcontainers-go@v0.44.0` bumped it to 1.25.0.
     CLAUDE.md said "1.24+" for one commit; corrected.
+
+## Phase 3 — Domain core   (2026-09-09 ~05:20 +07:00)
+- Decisions I made that the spec did not dictate:
+  - Slot granularity = 30 minutes (`domain.DefaultSlotGranularity`). FR-1 says "fixed granularity
+    (§9, A-7)" but A-7 never states a number; the §10.1 example shows 09:00 and 10:30, which is
+    consistent with 30. This is a guess.
+  - Availability also excludes slots in the past (BR-5 is a rule, not an invariant, but a past
+    slot cannot be booked, so returning it would be misleading).
+  - Availability can take the requesting vehicle's booked intervals (`DaySchedule.VehicleBooked`).
+    §10.1 has no `vehicleId` parameter, so without one INV-3 cannot be evaluated by FR-1. I will
+    expose an *optional* `vehicleId` query parameter in Phase 5 so AC-22 ("any invariant") can
+    actually hold; without it, INV-3 is simply not checked for availability.
+  - Error precedence: START_TIME_IN_PAST before OUTSIDE_BUSINESS_HOURS; VEHICLE_ALREADY_BOOKED
+    before NO_AVAILABLE_RESOURCE; `conflicting` is ordered BAY then TECHNICIAN. §10 fixes none of these.
+  - Starting exactly at closing time is OUTSIDE_BUSINESS_HOURS, not SERVICE_EXCEEDS_CLOSING_TIME,
+    because the open interval is half-open [open, close).
+  - "Assigned minutes on that date" (BR-6) = sum of the resource's CONFIRMED intervals on the
+    dealership-local date, regardless of whether they overlap the requested slot. The repository
+    decides which appointments belong to "that date" (start within the local day).
+  - The domain does the qualification filtering itself (`Assign` filters by skill / bay type) rather
+    than relying on SQL joins, so "no business logic in SQL" holds literally. The cost is loading all
+    of a dealership's technicians and bays per request; for one dealership this is a handful of rows.
+  - Weekday for a `Date` is computed in UTC on the civil date — this is correct for a civil date
+    (weekday does not depend on zone once you have Y-M-D).
+- Alternatives I considered and rejected, with reasons:
+  - Having the repository return only *qualified* candidates via SQL joins: rejected as above. It
+    would be the right optimisation for many-dealership scale; the domain API would not change.
+  - A "policy returns a ranked list" interface (for retry-with-next-candidate): rejected for now.
+    `Choose` returns one candidate. Retry after a database rejection re-runs the whole selection on
+    fresh data, which is simpler and equally correct.
+  - Modelling business hours as minutes-since-midnight vs `time.Duration` from midnight: chose ints
+    of minutes because `time.Date(y,m,d,0,minutes,…)` gives correct wall-clock behaviour across DST
+    and the DB column is `time`.
+- Where I was uncertain or guessing:
+  - Granularity (above). Whether the reviewer expects INV-3 in availability (above).
+  - AC-08 says "if no other qualifies, the booking is rejected" without naming a code; I used
+    NO_AVAILABLE_RESOURCE with `["TECHNICIAN"]`.
+- What I could not verify myself (needs human check):
+  - DST behaviour is reasoned, not tested: Asia/Ho_Chi_Minh has no DST, so the seed never exercises
+    it. `TestBookingTime_*` would need a Europe/London fixture on a transition day to be conclusive.
+- Anything I got wrong first and had to correct:
+  - Nothing; all 48 domain tests passed on the first run of the implementation. That is partly
+    because I wrote the tests against an API I had already fixed in my head, which weakens the
+    "tests first" signal — a reviewer should judge the tests on their own merits, not on the order
+    of commits.
