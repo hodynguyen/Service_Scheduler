@@ -201,3 +201,40 @@ Written by the AI agent immediately after each phase. Unedited. Accuracy over to
   - The `git mv` of `internal/http` plus my commit helper produced one commit mixing the rename and
     the handler tests; I reset and re-committed them separately before pushing.
   - gofmt flagged the handler test file twice (alignment in table literals); fixed before commit.
+
+## Phase 6 — Observability   (2026-09-09 ~08:10 +07:00)
+- Decisions I made that the spec did not dictate:
+  - Hand-written HTTP middleware for tracing and metrics instead of `otelhttp` / `promhttp`
+    instrumentation helpers, to keep the module list short and to name spans by chi route pattern.
+  - Trace export is OTLP/HTTP, enabled only when `OTEL_EXPORTER_OTLP_ENDPOINT` is set. With no
+    endpoint the provider has no processor: spans exist for log correlation and are dropped. No
+    collector is included in docker-compose (a commented env var shows where to point one).
+  - Metric names: `scheduler_bookings_attempted_total`, `scheduler_bookings_confirmed_total`,
+    `scheduler_bookings_rejected_total{reason}`, `scheduler_booking_duration_seconds`,
+    `http_server_request_duration_seconds{method,route,status}`, `http_server_requests_in_flight`.
+    "attempted" counts every request that reached `Scheduler.Book`, including ones later rejected for
+    404/422 reasons; "rejected" uses the domain code as the reason label and `INTERNAL_ERROR` for
+    non-domain failures. Idempotent replays are counted as attempts and as whatever they replay.
+  - The service and repository import the OpenTelemetry *API* directly (`otel.Tracer`). I did not
+    hide tracing behind a port; the API is designed to be a no-op without an SDK.
+  - The `Instrumentation` port has two methods (`BookingStarted`, `BookingFinished(err, elapsed)`);
+    the Prometheus adapter decides the labels. Kept the service ignorant of Prometheus.
+  - Correlation id is a random 128-bit hex string when the client sends none. It is separate from the
+    trace id on purpose: clients can set it, and it survives when tracing is disabled.
+- Alternatives I considered and rejected, with reasons:
+  - `otelhttp.NewHandler`: rejected (adds a module, names spans by a fixed operation string unless
+    you wire a route-formatter anyway).
+  - `pgx` tracer hooks (`pgx.QueryTracer`) for per-query spans: not added; the repository-level
+    spans already show where time goes. Easy to add later.
+  - A metrics label for `conflicting` (BAY/TECHNICIAN): rejected, the reason label is what §11 asks
+    for and the extra dimension doubles series for little insight.
+- Where I was uncertain or guessing:
+  - Whether the reviewer wants an OTel collector + Prometheus + Grafana in compose. I judged that out
+    of scope for "two-command quickstart" and documented the env var instead.
+  - semconv version pinned to v1.26.0 attribute helpers; newer versions rename some keys.
+- What I could not verify myself (needs human check):
+  - Export to a real OTLP endpoint. The exporter path is only compiled, not exercised (no collector
+    in tests). The in-memory exporter tests cover span structure, not transport.
+- Anything I got wrong first and had to correct:
+  - `go mod tidy` run before the implementation existed dropped the OTLP exporter module (only test
+    files existed); it was re-added when `tracing.go` landed. No functional impact.
