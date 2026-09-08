@@ -1,0 +1,56 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: gofmt
+        run: test -z "$(gofmt -l . | tee /dev/stderr)"
+      - name: go vet
+        run: go vet ./...
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+          args: --timeout=5m
+      - name: OpenAPI lint
+        run: npx --yes @redocly/cli@latest lint openapi.yaml
+
+  test:
+    name: test (unit + integration)
+    runs-on: ubuntu-latest # Docker is available for testcontainers
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Unit tests (no Docker)
+        run: go test -race -short -count=1 ./...
+      - name: Integration tests (testcontainers, Postgres 16)
+        run: go test -race -count=1 ./...
+        env:
+          TESTCONTAINERS_RYUK_DISABLED: "true"
+
+  build:
+    name: docker build
+    runs-on: ubuntu-latest
+    needs: [lint, test]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -t service-scheduler:ci .
