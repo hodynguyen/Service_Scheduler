@@ -264,3 +264,17 @@ func TestTracingMiddleware_CreatesServerSpanNamedByRouteAndPropagatesContext(t *
 		t.Fatalf("http.response.status_code = %q", status)
 	}
 }
+
+func TestSetupTracing_WithoutEndpointInstallsProviderAndShutsDown(t *testing.T) {
+	prev := otel.GetTracerProvider()
+	t.Cleanup(func() { otel.SetTracerProvider(prev) })
+	shutdown, err := observability.SetupTracing(context.Background(), "service-scheduler-test", "")
+	if err != nil {
+		t.Fatalf("SetupTracing must succeed without an exporter endpoint: %v", err)
+	}
+	_, span := otel.Tracer("test").Start(context.Background(), "op")
+	span.End()
+	if err := shutdown(context.Background()); err != nil {
+		t.Fatalf("shutdown: %v", err)
+	}
+}
