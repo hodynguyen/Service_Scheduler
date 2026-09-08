@@ -40,8 +40,17 @@ func WithPolicy(p domain.AssignmentPolicy) Option { return func(s *Scheduler) { 
 // WithSlotGranularity changes the availability step (FR-1).
 func WithSlotGranularity(d time.Duration) Option { return func(s *Scheduler) { s.granularity = d } }
 
-// WithMaxAttempts bounds how often a booking re-selects after losing a race.
-func WithMaxAttempts(n int) Option { return func(s *Scheduler) { s.maxAttempts = n } }
+// WithMaxAttempts sets the minimum number of selection attempts per booking
+// (the effective budget also grows with the number of qualifying resources).
+// Values below 1 are clamped to 1.
+func WithMaxAttempts(n int) Option {
+	return func(s *Scheduler) {
+		if n < 1 {
+			n = 1
+		}
+		s.maxAttempts = n
+	}
+}
 
 // New builds a Scheduler with the least-loaded policy and wall-clock time.
 func New(repo Repository, opts ...Option) *Scheduler {
@@ -85,7 +94,7 @@ func (s *Scheduler) Availability(ctx context.Context, q AvailabilityQuery) (Avai
 
 	date, err := domain.ParseDate(q.Date)
 	if err != nil {
-		return AvailabilityResult{}, domain.NewError(domain.CodeValidationError, "%v", err)
+		return AvailabilityResult{}, domain.NewError(domain.CodeValidationError, "date %q is not a valid calendar date (YYYY-MM-DD)", q.Date)
 	}
 	dealership, err := s.repo.Dealership(ctx, q.DealershipID)
 	if err != nil {
@@ -205,13 +214,17 @@ func (s *Scheduler) Book(ctx context.Context, req BookRequest) (appt domain.Appo
 			}
 		}
 
-		appt, outcome = s.assignAndInsert(ctx, tx, query, st, newAppt)
+		var transient bool
+		appt, outcome, transient = s.assignAndInsert(ctx, tx, query, st, newAppt)
 		if outcome != nil {
 			if _, ok := domain.AsError(outcome); !ok {
 				return outcome // infrastructure failure: roll everything back
 			}
 		}
-		if req.IdempotencyKey != "" {
+		// A transient outcome (selection budget exhausted under sustained
+		// contention) is not a fact about the request, so it is not
+		// remembered under the idempotency key: a client retry re-evaluates.
+		if req.IdempotencyKey != "" && !transient {
 			rec := IdempotencyRecord{
 				DealershipID: req.DealershipID,
 				Key:          req.IdempotencyKey,
@@ -261,35 +274,50 @@ func (s *Scheduler) replay(ctx context.Context, tx BookingTx, rec *IdempotencyRe
 
 // assignAndInsert selects resources on fresh data and lets the database
 // adjudicate. Losing a race to a concurrent booking is not a rejection by
-// itself: the selection is repeated (bounded) so spare resources are used.
-// When no candidate remains, Assign produces the precise NO_AVAILABLE_RESOURCE
-// / VEHICLE_ALREADY_BOOKED answer.
-func (s *Scheduler) assignAndInsert(ctx context.Context, tx BookingTx, q ScheduleQuery, st domain.ServiceType, na NewAppointment) (domain.Appointment, error) {
+// itself: the selection is repeated so spare resources are used. Because the
+// policy is deterministic every loser re-selects the same next candidate and
+// each round retires at most one competitor, so the budget is the number of
+// qualifying resources (a competitor consumes one technician and one bay per
+// round), never less than maxAttempts. When no candidate remains, Assign
+// produces the precise NO_AVAILABLE_RESOURCE / VEHICLE_ALREADY_BOOKED answer.
+//
+// transient is true only when the budget ran out while resources may still
+// be free (sustained contention beyond the qualified count, which needs a
+// competitor to win a race and then cancel within the same request).
+func (s *Scheduler) assignAndInsert(ctx context.Context, tx BookingTx, q ScheduleQuery, st domain.ServiceType, na NewAppointment) (appt domain.Appointment, err error, transient bool) {
 	var lastRace error
-	for attempt := 0; attempt < s.maxAttempts; attempt++ {
+	budget := s.maxAttempts
+	for attempt := 0; attempt < budget; attempt++ {
 		schedule, err := tx.DaySchedule(ctx, q)
 		if err != nil {
-			return domain.Appointment{}, err
+			return domain.Appointment{}, err, false
+		}
+		if attempt == 0 {
+			qualified := min(
+				len(domain.QualifiedTechnicians(schedule.Technicians, st.RequiredSkillID)),
+				len(domain.QualifiedBays(schedule.Bays, st.RequiredBayType)),
+			)
+			budget = max(budget, qualified+1)
 		}
 		assignment, err := s.assign(ctx, attempt, schedule, st, na.Interval)
 		if err != nil {
-			return domain.Appointment{}, err
+			return domain.Appointment{}, err, false
 		}
 		na.TechnicianID, na.BayID = assignment.Technician.ID, assignment.Bay.ID
 		appt, err := tx.InsertAppointment(ctx, na)
 		if err == nil {
-			return appt, nil
+			return appt, nil, false
 		}
 		if !errors.Is(err, ErrLostRace) {
-			return domain.Appointment{}, err
+			return domain.Appointment{}, err, false
 		}
 		lastRace = err
 	}
-	// Attempts exhausted under sustained contention: report the database's last verdict.
+	// Budget exhausted under sustained contention: report the database's last verdict.
 	if de, ok := domain.AsError(lastRace); ok {
-		return domain.Appointment{}, de
+		return domain.Appointment{}, de, true
 	}
-	return domain.Appointment{}, lastRace
+	return domain.Appointment{}, lastRace, false
 }
 
 // GetAppointment implements FR-3.
