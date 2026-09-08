@@ -1,4 +1,118 @@
 // Command server runs the Unified Service Scheduler HTTP API.
 package main
 
-func main() {}
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/hodynguyen/service-scheduler/internal/config"
+	"github.com/hodynguyen/service-scheduler/internal/httpapi"
+	"github.com/hodynguyen/service-scheduler/internal/repository/postgres"
+	"github.com/hodynguyen/service-scheduler/internal/service"
+)
+
+func main() {
+	if err := run(); err != nil {
+		slog.Error("server exited with error", "error", err)
+		os.Exit(1)
+	}
+}
+
+func run() error {
+	cfg, err := config.FromEnv()
+	if err != nil {
+		return err
+	}
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: parseLevel(cfg.LogLevel)}))
+	slog.SetDefault(logger)
+
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	pool, err := connect(ctx, cfg.DatabaseURL, logger)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+
+	if err := postgres.Migrate(ctx, pool); err != nil {
+		return fmt.Errorf("migrate: %w", err)
+	}
+	if cfg.Seed {
+		if err := postgres.Seed(ctx, pool); err != nil {
+			return fmt.Errorf("seed: %w", err)
+		}
+		logger.Info("reference data seeded", "dealership_id", postgres.SeedDealershipID)
+	}
+
+	scheduler := service.New(postgres.New(pool))
+	router := httpapi.NewRouter(scheduler)
+
+	srv := &http.Server{
+		Addr:              cfg.HTTPAddr,
+		Handler:           router,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		WriteTimeout:      35 * time.Second,
+		IdleTimeout:       60 * time.Second,
+	}
+	errCh := make(chan error, 1)
+	go func() {
+		logger.Info("http server listening", "addr", cfg.HTTPAddr)
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			errCh <- err
+		}
+		close(errCh)
+	}()
+
+	select {
+	case err := <-errCh:
+		return err
+	case <-ctx.Done():
+	}
+	logger.Info("shutting down")
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
+	defer cancel()
+	return srv.Shutdown(shutdownCtx)
+}
+
+// connect retries until the database accepts connections (compose starts the
+// app only after the healthcheck, but a restart may still race it).
+func connect(ctx context.Context, url string, logger *slog.Logger) (*pgxpool.Pool, error) {
+	pool, err := pgxpool.New(ctx, url)
+	if err != nil {
+		return nil, fmt.Errorf("parse DATABASE_URL: %w", err)
+	}
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		pingCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		err = pool.Ping(pingCtx)
+		cancel()
+		if err == nil {
+			return pool, nil
+		}
+		if time.Now().After(deadline) || ctx.Err() != nil {
+			pool.Close()
+			return nil, fmt.Errorf("database not reachable: %w", err)
+		}
+		logger.Warn("database not ready, retrying", "error", err)
+		time.Sleep(time.Second)
+	}
+}
+
+func parseLevel(s string) slog.Level {
+	var l slog.Level
+	if err := l.UnmarshalText([]byte(s)); err != nil {
+		return slog.LevelInfo
+	}
+	return l
+}
