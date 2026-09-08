@@ -5,7 +5,7 @@ are referenced from tests, commits and docs.
 
 ## Non-negotiable
 
-- Go 1.24+, PostgreSQL 16, `chi` router, `pgx` v5, `testcontainers-go` for integration tests.
+- Go 1.25+ (go.mod floor set by testcontainers-go), PostgreSQL 16, `chi` router, `pgx` v5, `testcontainers-go` for integration tests.
   **No ORM.** Keep the dependency list minimal; justify every new module.
 - Layering: `internal/http` (handler) -> `internal/service` -> `internal/repository/postgres`.
   Business logic lives in `internal/domain` (pure) and is orchestrated by the service.
