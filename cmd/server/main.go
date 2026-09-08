@@ -12,10 +12,12 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/hodynguyen/service-scheduler/internal/config"
 	"github.com/hodynguyen/service-scheduler/internal/httpapi"
+	"github.com/hodynguyen/service-scheduler/internal/observability"
 	"github.com/hodynguyen/service-scheduler/internal/repository/postgres"
 	"github.com/hodynguyen/service-scheduler/internal/service"
 )
@@ -32,11 +34,22 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: parseLevel(cfg.LogLevel)}))
+	logger := observability.NewLogger(os.Stdout, parseLevel(cfg.LogLevel))
 	slog.SetDefault(logger)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+
+	shutdownTracing, err := observability.SetupTracing(ctx, cfg.ServiceName, cfg.OTLPEndpoint)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		flushCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = shutdownTracing(flushCtx)
+	}()
+	metrics := observability.NewMetrics(nil)
 
 	pool, err := connect(ctx, cfg.DatabaseURL, logger)
 	if err != nil {
@@ -54,8 +67,16 @@ func run() error {
 		logger.Info("reference data seeded", "dealership_id", postgres.SeedDealershipID)
 	}
 
-	scheduler := service.New(postgres.New(pool))
-	router := httpapi.NewRouter(scheduler)
+	scheduler := service.New(postgres.New(pool), service.WithInstrumentation(metrics))
+	router := httpapi.NewRouter(scheduler,
+		httpapi.WithMiddleware(
+			observability.CorrelationMiddleware,
+			observability.TracingMiddleware,
+			metrics.HTTPMiddleware,
+			observability.RequestLogger(logger),
+		),
+		httpapi.WithRoutes(func(r chi.Router) { r.Method(http.MethodGet, "/metrics", metrics.Handler()) }),
+	)
 
 	srv := &http.Server{
 		Addr:              cfg.HTTPAddr,
