@@ -1,0 +1,330 @@
+openapi: 3.0.3
+info:
+  title: Unified Service Scheduler API
+  version: 1.0.0
+  description: |
+    Backend for booking dealership workshop appointments with automatic technician and bay
+    assignment. Contract source: `docs/requirements.md` §10.
+
+    Conventions
+    * All timestamps are ISO-8601 with an explicit offset. Responses use the dealership's local
+      offset regardless of the offset the client sent.
+    * Intervals are half-open `[start, end)`.
+    * Every response carries `X-Correlation-ID` (echoed from the request or generated).
+    * Errors share one body shape (`ErrorResponse`).
+servers:
+  - url: http://localhost:8080/api/v1
+tags:
+  - name: Availability
+  - name: Appointments
+
+paths:
+  /availability:
+    get:
+      tags: [Availability]
+      summary: List bookable start times for a service type on a date (FR-1)
+      description: |
+        Slots are generated every 30 minutes within the dealership's business hours for that
+        weekday, kept only if the whole job fits before closing and a qualified, free technician
+        **and** bay exist at that moment (INV-1..INV-6). Passing `vehicleId` additionally applies
+        INV-3 for that vehicle. Availability is advisory and carries no reservation.
+      parameters:
+        - $ref: '#/components/parameters/CorrelationID'
+        - name: dealershipId
+          in: query
+          required: true
+          schema: { $ref: '#/components/schemas/UUID' }
+        - name: serviceTypeId
+          in: query
+          required: true
+          schema: { $ref: '#/components/schemas/UUID' }
+        - name: date
+          in: query
+          required: true
+          description: Calendar date in the dealership's timezone.
+          schema: { type: string, format: date, example: '2030-03-04' }
+        - name: vehicleId
+          in: query
+          required: false
+          description: Optional. When present, slots where this vehicle already has an active appointment are excluded.
+          schema: { $ref: '#/components/schemas/UUID' }
+      responses:
+        '200':
+          description: Bookable start times. An empty array is a valid answer (closed day, fully booked, or day in the past).
+          headers:
+            X-Correlation-ID: { $ref: '#/components/headers/XCorrelationID' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AvailabilityResponse' }
+              examples:
+                slots:
+                  value:
+                    date: '2030-03-04'
+                    serviceType: { id: '30000000-0000-4000-8000-000000000002', name: 'Wheel alignment and balancing', durationMinutes: 60 }
+                    availableSlots: ['2030-03-04T08:00:00+07:00', '2030-03-04T08:30:00+07:00', '2030-03-04T09:00:00+07:00']
+                fullyBooked:
+                  value:
+                    date: '2030-03-09'
+                    serviceType: { id: '30000000-0000-4000-8000-000000000003', name: 'EV high-voltage battery diagnostic', durationMinutes: 90 }
+                    availableSlots: []
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /appointments:
+    post:
+      tags: [Appointments]
+      summary: Book an appointment with automatic resource assignment (FR-2, FR-4)
+      description: |
+        The client supplies **what** and **when**; the system chooses **who** (technician) and
+        **where** (bay) using the least-loaded policy (BR-6). End time is `start + duration` of the
+        service type (BR-8). The customer is derived from the vehicle's owner (A-6).
+
+        Creation is atomic. Overlap invariants INV-1..INV-3 are enforced by PostgreSQL exclusion
+        constraints; concurrent requests for the last slot yield exactly one `201`.
+
+        Unknown JSON fields are rejected with `400` so a client cannot believe it supplied a
+        duration, technician or bay.
+      parameters:
+        - $ref: '#/components/parameters/CorrelationID'
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: |
+            UUID chosen by the client. A repeated key (same dealership, same payload, within 24 h)
+            returns the original result — including an original rejection — without creating a
+            second appointment. The same key with a different payload is `422 IDEMPOTENCY_KEY_REUSED`.
+          schema: { $ref: '#/components/schemas/UUID' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateAppointmentRequest' }
+            example:
+              dealershipId: '10000000-0000-4000-8000-000000000001'
+              vehicleId: '70000000-0000-4000-8000-000000000001'
+              serviceTypeId: '30000000-0000-4000-8000-000000000002'
+              startTime: '2030-03-04T09:00:00+07:00'
+      responses:
+        '201':
+          description: Appointment confirmed. Replays of an idempotent request return `201` with the identical body.
+          headers:
+            Location:
+              description: URL of the created appointment.
+              schema: { type: string, example: /api/v1/appointments/6f1c2b8e-3f7a-4e1b-9d2c-5a8b7c6d5e4f }
+            X-Correlation-ID: { $ref: '#/components/headers/XCorrelationID' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Appointment' }
+              example: { $ref: '#/components/examples/AppointmentExample/value' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: |
+            * `NO_AVAILABLE_RESOURCE` — no qualifying technician and/or bay is free; `conflicting`
+              lists `BAY`, `TECHNICIAN` or both (in that order).
+            * `VEHICLE_ALREADY_BOOKED` — the vehicle has an overlapping active appointment (INV-3).
+          headers:
+            X-Correlation-ID: { $ref: '#/components/headers/XCorrelationID' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+              examples:
+                noResource:
+                  value: { code: NO_AVAILABLE_RESOURCE, message: 'no qualifying free resource for [2030-03-04T09:00:00+07:00, 2030-03-04T10:30:00+07:00)', conflicting: [BAY, TECHNICIAN] }
+                vehicleBusy:
+                  value: { code: VEHICLE_ALREADY_BOOKED, message: 'vehicle already has an active appointment overlapping [2030-03-04T09:15:00+07:00, 2030-03-04T09:45:00+07:00)' }
+        '422':
+          description: |
+            * `OUTSIDE_BUSINESS_HOURS` — closed that day, or start before opening / at or after closing (BR-4).
+            * `SERVICE_EXCEEDS_CLOSING_TIME` — start is valid but the job would end after closing (BR-4).
+            * `START_TIME_IN_PAST` — BR-5.
+            * `IDEMPOTENCY_KEY_REUSED` — key already used with a different payload.
+          headers:
+            X-Correlation-ID: { $ref: '#/components/headers/XCorrelationID' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+              examples:
+                outsideHours:
+                  value: { code: OUTSIDE_BUSINESS_HOURS, message: 'start time 07:30 is outside opening hours 08:00–17:00' }
+                exceedsClosing:
+                  value: { code: SERVICE_EXCEEDS_CLOSING_TIME, message: 'service would finish at 17:30, after closing time 17:00' }
+                inPast:
+                  value: { code: START_TIME_IN_PAST, message: 'start time 2026-01-01T09:00:00+07:00 is in the past' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /appointments/{id}:
+    get:
+      tags: [Appointments]
+      summary: Retrieve an appointment (FR-3)
+      parameters:
+        - $ref: '#/components/parameters/CorrelationID'
+        - name: id
+          in: path
+          required: true
+          description: Appointment id. A syntactically invalid id is treated as unknown (`404`).
+          schema: { $ref: '#/components/schemas/UUID' }
+      responses:
+        '200':
+          description: Same body as the `201` returned at creation.
+          headers:
+            X-Correlation-ID: { $ref: '#/components/headers/XCorrelationID' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Appointment' }
+              example: { $ref: '#/components/examples/AppointmentExample/value' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+components:
+  parameters:
+    CorrelationID:
+      name: X-Correlation-ID
+      in: header
+      required: false
+      description: Optional client correlation id; generated when absent and always echoed back.
+      schema: { type: string }
+  headers:
+    XCorrelationID:
+      description: Correlation id for this request (echoed or generated).
+      schema: { type: string }
+
+  responses:
+    ValidationError:
+      description: Malformed payload or query (`VALIDATION_ERROR`). `details` maps field name to reason.
+      headers:
+        X-Correlation-ID: { $ref: '#/components/headers/XCorrelationID' }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+          example:
+            code: VALIDATION_ERROR
+            message: invalid request
+            details: { startTime: 'must be ISO-8601 with an explicit offset, e.g. 2026-09-15T09:00:00+07:00', vehicleId: 'must be a UUID' }
+    NotFound:
+      description: Unknown dealership, vehicle, service type or appointment (`RESOURCE_NOT_FOUND`). A vehicle registered with another dealership is also not found (BR-7).
+      headers:
+        X-Correlation-ID: { $ref: '#/components/headers/XCorrelationID' }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+          example: { code: RESOURCE_NOT_FOUND, message: 'vehicle "70000000-0000-4000-8000-0000000000ff" not found' }
+    InternalError:
+      description: Unexpected failure (`INTERNAL_ERROR`). No internal details are returned.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+          example: { code: INTERNAL_ERROR, message: an internal error occurred }
+
+  schemas:
+    UUID:
+      type: string
+      format: uuid
+      example: '10000000-0000-4000-8000-000000000001'
+
+    CreateAppointmentRequest:
+      type: object
+      additionalProperties: false
+      required: [dealershipId, vehicleId, serviceTypeId, startTime]
+      properties:
+        dealershipId: { $ref: '#/components/schemas/UUID' }
+        vehicleId: { $ref: '#/components/schemas/UUID' }
+        serviceTypeId: { $ref: '#/components/schemas/UUID' }
+        startTime:
+          type: string
+          format: date-time
+          description: ISO-8601 with an explicit offset (`Z` accepted). Interpreted as an instant; business hours are evaluated in the dealership's timezone.
+          example: '2030-03-04T09:00:00+07:00'
+
+    Appointment:
+      type: object
+      required: [id, status, startTime, endTime, customer, vehicle, serviceType, technician, bay]
+      properties:
+        id: { $ref: '#/components/schemas/UUID' }
+        status: { type: string, enum: [CONFIRMED, CANCELLED] }
+        startTime: { type: string, format: date-time }
+        endTime: { type: string, format: date-time, description: startTime + service type duration }
+        customer: { $ref: '#/components/schemas/Ref' }
+        vehicle:
+          type: object
+          required: [id, vin, model]
+          properties:
+            id: { $ref: '#/components/schemas/UUID' }
+            vin: { type: string }
+            model: { type: string }
+        serviceType: { $ref: '#/components/schemas/Ref' }
+        technician: { $ref: '#/components/schemas/Ref' }
+        bay:
+          type: object
+          required: [id, name, bayType]
+          properties:
+            id: { $ref: '#/components/schemas/UUID' }
+            name: { type: string }
+            bayType: { type: string, enum: [GENERAL, ALIGNMENT, EV] }
+
+    Ref:
+      type: object
+      required: [id, name]
+      properties:
+        id: { $ref: '#/components/schemas/UUID' }
+        name: { type: string }
+
+    AvailabilityResponse:
+      type: object
+      required: [date, serviceType, availableSlots]
+      properties:
+        date: { type: string, format: date }
+        serviceType:
+          type: object
+          required: [id, name, durationMinutes]
+          properties:
+            id: { $ref: '#/components/schemas/UUID' }
+            name: { type: string }
+            durationMinutes: { type: integer, minimum: 1 }
+        availableSlots:
+          type: array
+          description: Start times only, ascending, in the dealership's offset. Never null.
+          items: { type: string, format: date-time }
+
+    ErrorResponse:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          enum:
+            - NO_AVAILABLE_RESOURCE
+            - VEHICLE_ALREADY_BOOKED
+            - OUTSIDE_BUSINESS_HOURS
+            - SERVICE_EXCEEDS_CLOSING_TIME
+            - START_TIME_IN_PAST
+            - IDEMPOTENCY_KEY_REUSED
+            - RESOURCE_NOT_FOUND
+            - VALIDATION_ERROR
+            - NOT_FOUND
+            - METHOD_NOT_ALLOWED
+            - TIMEOUT
+            - INTERNAL_ERROR
+        message: { type: string }
+        conflicting:
+          type: array
+          description: Present only for NO_AVAILABLE_RESOURCE. Order is BAY then TECHNICIAN.
+          items: { type: string, enum: [BAY, TECHNICIAN] }
+        details:
+          type: object
+          description: Present only for VALIDATION_ERROR; field name to reason.
+          additionalProperties: { type: string }
+
+  examples:
+    AppointmentExample:
+      value:
+        id: 6f1c2b8e-3f7a-4e1b-9d2c-5a8b7c6d5e4f
+        status: CONFIRMED
+        startTime: '2030-03-04T09:00:00+07:00'
+        endTime: '2030-03-04T10:00:00+07:00'
+        customer: { id: '60000000-0000-4000-8000-000000000001', name: Mai Pham }
+        vehicle: { id: '70000000-0000-4000-8000-000000000001', vin: JTNB11HK7J3000001, model: Toyota Camry 2.5Q }
+        serviceType: { id: '30000000-0000-4000-8000-000000000002', name: Wheel alignment and balancing }
+        technician: { id: '50000000-0000-4000-8000-000000000001', name: An Nguyen }
+        bay: { id: '40000000-0000-4000-8000-000000000003', name: Alignment rig, bayType: ALIGNMENT }
