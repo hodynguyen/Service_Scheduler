@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"time"
 
 	"go.opentelemetry.io/otel/trace"
@@ -28,12 +29,16 @@ func CorrelationID(ctx context.Context) string {
 	return id
 }
 
-// CorrelationMiddleware reuses the client's X-Correlation-ID or generates one,
-// puts it in the context and echoes it in the response.
+// correlationIDRe bounds what we accept from clients so logs, spans and
+// response headers cannot be polluted with arbitrary or oversized values.
+var correlationIDRe = regexp.MustCompile(`^[A-Za-z0-9._:-]{1,128}$`)
+
+// CorrelationMiddleware reuses the client's X-Correlation-ID (if well-formed)
+// or generates one, puts it in the context and echoes it in the response.
 func CorrelationMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		id := r.Header.Get(CorrelationHeader)
-		if id == "" {
+		if !correlationIDRe.MatchString(id) {
 			id = newID()
 		}
 		w.Header().Set(CorrelationHeader, id)

@@ -51,6 +51,14 @@ func TestCorrelation_PropagatesIncomingHeader(t *testing.T) {
 	if seen != "client-supplied-123" || rec.Header().Get("X-Correlation-ID") != "client-supplied-123" {
 		t.Fatalf("incoming id must be reused, got %q / %q", seen, rec.Header().Get("X-Correlation-ID"))
 	}
+	// Oversized or odd characters are replaced, not echoed.
+	req = httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("X-Correlation-ID", strings.Repeat("x", 129)+" <script>")
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if got := rec.Header().Get("X-Correlation-ID"); strings.Contains(got, "script") || len(got) != 32 || got != seen {
+		t.Fatalf("malformed client id must be replaced by a generated one, got %q", rec.Header().Get("X-Correlation-ID"))
+	}
 }
 
 func TestLogger_EmitsJSONWithCorrelationAndTraceIDs(t *testing.T) {

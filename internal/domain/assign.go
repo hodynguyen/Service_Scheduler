@@ -70,13 +70,7 @@ func Assign(s DaySchedule, st ServiceType, iv Interval, policy AssignmentPolicy)
 		bayCandidates = append(bayCandidates, Candidate{ID: bs.ID, LoadMinutes: LoadMinutes(bs.Booked)})
 	}
 
-	var conflicting []ResourceKind
-	if len(bayCandidates) == 0 {
-		conflicting = append(conflicting, ResourceBay)
-	}
-	if len(techCandidates) == 0 {
-		conflicting = append(conflicting, ResourceTechnician)
-	}
+	conflicting := conflictingFor(len(bayCandidates) == 0, len(techCandidates) == 0)
 	if len(conflicting) > 0 {
 		return Assignment{}, &Error{
 			Code:        CodeNoAvailableResource,
@@ -85,7 +79,25 @@ func Assign(s DaySchedule, st ServiceType, iv Interval, policy AssignmentPolicy)
 		}
 	}
 
-	tech, _ := policy.Choose(techCandidates)
-	bay, _ := policy.Choose(bayCandidates)
+	tech, okTech := policy.Choose(techCandidates)
+	bay, okBay := policy.Choose(bayCandidates)
+	if !okTech || !okBay {
+		// A custom policy declined to choose; report it as unavailability
+		// rather than inserting empty identifiers.
+		return Assignment{}, &Error{Code: CodeNoAvailableResource, Message: "assignment policy selected no resource for " + iv.String(),
+			Conflicting: conflictingFor(!okBay, !okTech)}
+	}
 	return Assignment{Technician: techByID[tech.ID], Bay: bayByID[bay.ID]}, nil
+}
+
+// conflictingFor builds the §10 conflicting list in its fixed order.
+func conflictingFor(noBay, noTechnician bool) []ResourceKind {
+	var out []ResourceKind
+	if noBay {
+		out = append(out, ResourceBay)
+	}
+	if noTechnician {
+		out = append(out, ResourceTechnician)
+	}
+	return out
 }

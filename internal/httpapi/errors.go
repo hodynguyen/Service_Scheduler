@@ -44,8 +44,12 @@ func writeDomainError(w http.ResponseWriter, r *http.Request, err error) {
 		writeError(w, statusFor(de.Code), string(de.Code), de.Message, conflicting, nil)
 		return
 	}
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		slog.WarnContext(r.Context(), "request aborted", "error", err)
+	if errors.Is(err, context.Canceled) {
+		slog.WarnContext(r.Context(), "request cancelled by client", "error", err)
+		return // the client is gone; nothing useful to write
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		slog.WarnContext(r.Context(), "request timed out", "error", err)
 		writeError(w, http.StatusGatewayTimeout, "TIMEOUT", "the request could not be completed in time", nil, nil)
 		return
 	}

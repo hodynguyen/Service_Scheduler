@@ -26,6 +26,13 @@ type Option func(*routerConfig)
 type routerConfig struct {
 	middlewares []func(http.Handler) http.Handler
 	extraRoutes func(r chi.Router)
+	ready       func(ctx context.Context) error
+}
+
+// WithReadiness installs a dependency check (e.g. a database ping) behind
+// GET /readyz, distinct from the liveness-only /healthz.
+func WithReadiness(check func(ctx context.Context) error) Option {
+	return func(c *routerConfig) { c.ready = check }
 }
 
 // WithMiddleware prepends handler-chain middleware (logging, metrics, tracing).
@@ -60,6 +67,17 @@ func NewRouter(svc Service, opts ...Option) http.Handler {
 
 	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	})
+	r.Get("/readyz", func(w http.ResponseWriter, req *http.Request) {
+		if cfg.ready != nil {
+			ctx, cancel := context.WithTimeout(req.Context(), time.Second)
+			defer cancel()
+			if err := cfg.ready(ctx); err != nil {
+				writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "unavailable", "reason": "dependency check failed"})
+				return
+			}
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ready"})
 	})
 	if cfg.extraRoutes != nil {
 		cfg.extraRoutes(r)

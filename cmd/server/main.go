@@ -11,6 +11,7 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
+	_ "time/tzdata" // dealership IANA zones must resolve even on images without zoneinfo
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -76,6 +77,7 @@ func run() error {
 			observability.RequestLogger(logger),
 		),
 		httpapi.WithRoutes(func(r chi.Router) { r.Method(http.MethodGet, "/metrics", metrics.Handler()) }),
+		httpapi.WithReadiness(pool.Ping),
 	)
 
 	srv := &http.Server{
@@ -126,7 +128,12 @@ func connect(ctx context.Context, url string, logger *slog.Logger) (*pgxpool.Poo
 			return nil, fmt.Errorf("database not reachable: %w", err)
 		}
 		logger.Warn("database not ready, retrying", "error", err)
-		time.Sleep(time.Second)
+		select {
+		case <-time.After(time.Second):
+		case <-ctx.Done():
+			pool.Close()
+			return nil, ctx.Err()
+		}
 	}
 }
 

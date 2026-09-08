@@ -397,3 +397,17 @@ func TestHTTP_UnknownRouteAndMethod(t *testing.T) {
 		t.Fatalf("healthz status = %d", rec.Code)
 	}
 }
+
+func TestHTTP_ReadyzReflectsDependencyCheck(t *testing.T) {
+	f := &fakeService{}
+	ok := httpapi.NewRouter(f, httpapi.WithReadiness(func(context.Context) error { return nil }))
+	rec, _ := do(t, ok, http.MethodGet, "/readyz", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("ready status = %d", rec.Code)
+	}
+	down := httpapi.NewRouter(f, httpapi.WithReadiness(func(context.Context) error { return errors.New("db down") }))
+	rec, body := do(t, down, http.MethodGet, "/readyz", "")
+	if rec.Code != http.StatusServiceUnavailable || strings.Contains(rec.Body.String(), "db down") {
+		t.Fatalf("not-ready status = %d body %v (must not leak the cause)", rec.Code, body)
+	}
+}

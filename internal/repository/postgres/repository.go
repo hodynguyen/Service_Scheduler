@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -38,6 +39,22 @@ type querier interface {
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 }
 
+// locations caches time.LoadLocation results: Go re-reads zoneinfo on every
+// call and this sits on the booking hot path.
+var locations sync.Map // name -> *time.Location
+
+func loadLocation(name string) (*time.Location, error) {
+	if loc, ok := locations.Load(name); ok {
+		return loc.(*time.Location), nil
+	}
+	loc, err := time.LoadLocation(name)
+	if err != nil {
+		return nil, err
+	}
+	locations.Store(name, loc)
+	return loc, nil
+}
+
 var uuidRe = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
 // isUUID guards lookups so a malformed identifier reads as "not found"
@@ -62,7 +79,7 @@ func dealership(ctx context.Context, q querier, id string) (domain.Dealership, e
 	if err != nil {
 		return domain.Dealership{}, fmt.Errorf("select dealership: %w", err)
 	}
-	loc, err := time.LoadLocation(tz)
+	loc, err := loadLocation(tz)
 	if err != nil {
 		return domain.Dealership{}, fmt.Errorf("dealership %s has invalid timezone %q: %w", id, tz, err)
 	}
@@ -184,7 +201,7 @@ func appointment(ctx context.Context, q querier, id string) (domain.Appointment,
 	if err != nil {
 		return domain.Appointment{}, fmt.Errorf("select appointment: %w", err)
 	}
-	loc, err := time.LoadLocation(tz)
+	loc, err := loadLocation(tz)
 	if err != nil {
 		return domain.Appointment{}, fmt.Errorf("appointment %s: invalid dealership timezone %q: %w", id, tz, err)
 	}

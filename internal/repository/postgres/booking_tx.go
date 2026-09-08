@@ -150,16 +150,17 @@ func (b *bookingTx) SaveIdempotencyRecord(ctx context.Context, rec service.Idemp
 	}
 	_, err := b.tx.Exec(ctx, `
 		INSERT INTO idempotency_key (dealership_id, key, request_fingerprint, outcome, appointment_id, error_code, error_conflicting, created_at, expires_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, now(), $8)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		ON CONFLICT (dealership_id, key) DO UPDATE SET
 			request_fingerprint = EXCLUDED.request_fingerprint,
 			outcome             = EXCLUDED.outcome,
 			appointment_id      = EXCLUDED.appointment_id,
 			error_code          = EXCLUDED.error_code,
 			error_conflicting   = EXCLUDED.error_conflicting,
-			created_at          = now(),
+			created_at          = EXCLUDED.created_at,
 			expires_at          = EXCLUDED.expires_at`,
-		rec.DealershipID, rec.Key, rec.Fingerprint, outcome, apptID, errCode, conflicting, rec.ExpiresAt)
+		rec.DealershipID, rec.Key, rec.Fingerprint, outcome, apptID, errCode, conflicting,
+		rec.ExpiresAt.Add(-service.IdempotencyRetention), rec.ExpiresAt)
 	if err != nil {
 		return fmt.Errorf("save idempotency key: %w", err)
 	}
