@@ -6,7 +6,12 @@ import (
 	"testing"
 	"time"
 
+	"go.opentelemetry.io/otel"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+
 	"github.com/hodynguyen/service-scheduler/internal/httpapi"
+	"github.com/hodynguyen/service-scheduler/internal/observability"
 	"github.com/hodynguyen/service-scheduler/internal/repository/postgres"
 	"github.com/hodynguyen/service-scheduler/internal/service"
 	"github.com/hodynguyen/service-scheduler/internal/testutil/pgtest"
@@ -119,4 +124,50 @@ func TestE2E_AC22_AvailabilityReflectsBookings(t *testing.T) {
 	if strings.Contains(rec.Body.String(), "T10:00:00+07:00") || strings.Contains(rec.Body.String(), "T09:30:00+07:00") || strings.Contains(rec.Body.String(), "T10:30:00+07:00") {
 		t.Fatalf("overlapping slots must be excluded: %s", rec.Body.String())
 	}
+}
+
+func TestE2E_TraceSpansHandlerPolicyPersistence(t *testing.T) {
+	pool := pgtest.Pool(t)
+	pgtest.Reset(t, pool)
+	exporter := tracetest.NewInMemoryExporter()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSyncer(exporter))
+	prev := otel.GetTracerProvider()
+	otel.SetTracerProvider(tp)
+	t.Cleanup(func() { otel.SetTracerProvider(prev) })
+
+	fixedNow := time.Date(2030, time.March, 4, 7, 0, 0, 0, hcm)
+	svc := service.New(postgres.New(pool), service.WithClock(func() time.Time { return fixedNow }))
+	h := httpapi.NewRouter(svc, httpapi.WithMiddleware(observability.TracingMiddleware))
+
+	rec, _ := do(t, h, http.MethodPost, "/api/v1/appointments", bookingBody(postgres.SeedVehicleCamryID, postgres.SeedServiceTypeAlignmentID, "2030-03-04T09:00:00+07:00"))
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d %s", rec.Code, rec.Body.String())
+	}
+
+	names := map[string]tracetest.SpanStub{}
+	for _, s := range exporter.GetSpans() {
+		names[s.Name] = s
+	}
+	for _, want := range []string{"POST /api/v1/appointments", "scheduler.Book", "policy.Assign", "repository.DaySchedule", "repository.InsertAppointment"} {
+		if _, ok := names[want]; !ok {
+			t.Errorf("missing span %q; have %v", want, keys(names))
+		}
+	}
+	root := names["POST /api/v1/appointments"].SpanContext.TraceID()
+	for name, s := range names {
+		if s.SpanContext.TraceID() != root {
+			t.Errorf("span %q is not in the request trace", name)
+		}
+	}
+	if names["policy.Assign"].Parent.SpanID() != names["scheduler.Book"].SpanContext.SpanID() {
+		t.Error("policy.Assign must be a child of scheduler.Book")
+	}
+}
+
+func keys(m map[string]tracetest.SpanStub) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
 }
