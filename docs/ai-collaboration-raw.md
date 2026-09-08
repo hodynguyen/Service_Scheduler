@@ -273,3 +273,39 @@ Written by the AI agent immediately after each phase. Unedited. Accuracy over to
   - Mermaid rendering of the three diagrams on GitHub (syntax checked by eye only).
 - Anything I got wrong first and had to correct:
   - First `openapi.yaml` used `example: {$ref: …}` (invalid) and lacked operationIds; fixed after lint.
+
+## Final — verification and independent review   (2026-09-09 ~10:30 +07:00)
+- What was verified, and how:
+  - `docker compose down -v && docker compose up --build -d` from a clean state: both containers
+    healthy; health 200, booking 201, adjacent booking 201, conflict 409 via cURL against the stack.
+  - `make test` (`go test -race -count=1 ./...`) after `go clean -testcache`: all packages pass;
+    integration suites start their own Postgres 16 via testcontainers.
+  - `golangci-lint` v2.13 (installed locally for this step): 0 issues after fixing 8 findings
+    (errcheck in tests, a tagged switch, a deprecated call).
+  - `redocly lint openapi.yaml`: valid, 2 warnings (localhost server URL).
+  - GitHub Actions: **not executed** — nothing had been pushed when this entry was written.
+- Independent review passes (two separate agent runs with fresh context, read-only):
+  - **Code review** found one High I agree with and had missed: a fixed retry budget of 3 plus the
+    deterministic policy rejects the 4th of 4 concurrent requests although resources are free, and
+    that spurious rejection was then stored under the idempotency key for 24 h. The seed has only two
+    GENERAL bays, so my own spare-resource test could not see it. Fixed: budget derived from the
+    qualified-resource count, transient outcomes not persisted; a new test with four bays and four
+    concurrent requests (5 runs) pins it. Also applied: policy `ok` flag checked, `LoadLocation`
+    cached, correlation id bounded, `/readyz`, no body on client cancel, ctx-aware start-up wait,
+    `tzdata` embedded, CI action version, `make test-integration` target (my Phase 6 sed had silently
+    not matched after the package rename — the target still ran a bogus `-run` filter).
+    Not applied (documented in review-notes): DB enforcement of INV-4/5 via denormalised FKs,
+    rejecting non-zero seconds, RealIP trust.
+  - **Spec verification** produced a full traceability matrix (every FR/BR/INV/§10 code and AC-01..24
+    mapped to implementation and tests) and rated compliance partial on three documented points:
+    INV-3 in availability only with `vehicleId`, AC-18's literal wording, FR-4 not recording
+    pre-transaction outcomes. It also caught test-honesty problems I fixed: a test named
+    "…ScopedPerDealership" that used two keys in one dealership (renamed; real scope + 24 h expiry
+    tests added at repository level), INV-7 tests covering only the technician FK (bay and vehicle
+    added), and three domain helpers that were tested but unused in production (`Assign` now calls
+    the qualification helpers; `ActiveIntervals` deleted).
+- What I would still not sign off without a human:
+  - The three precedence/semantics choices above (INV-3 in availability, AC-18 wording, FR-4 scope).
+  - INV-4/INV-5 database enforcement.
+  - Performance under real contention against the 200 ms p95 NFR — no benchmark exists.
+- Commit count at the end: 66 (requested 25–40). See Phase 7 for why I did not squash.

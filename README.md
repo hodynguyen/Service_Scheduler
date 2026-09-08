@@ -45,7 +45,7 @@ dealership's offset. Full contract: [`openapi.yaml`](openapi.yaml).
 | `GET` | `/availability?dealershipId&serviceTypeId&date[&vehicleId]` | Bookable start times (30-min steps) for a service type on a local date (FR-1) | `200` `{date, serviceType, availableSlots[]}` | `400 VALIDATION_ERROR`, `404 RESOURCE_NOT_FOUND` |
 | `POST` | `/appointments` (header `Idempotency-Key`: UUID, optional) | Book with automatic technician/bay assignment (FR-2, FR-4) | `201` appointment + `Location` | `409 NO_AVAILABLE_RESOURCE {conflicting:[BAY\|TECHNICIAN]}`, `409 VEHICLE_ALREADY_BOOKED`, `422 OUTSIDE_BUSINESS_HOURS`, `422 SERVICE_EXCEEDS_CLOSING_TIME`, `422 START_TIME_IN_PAST`, `422 IDEMPOTENCY_KEY_REUSED`, `404`, `400` |
 | `GET` | `/appointments/{id}` | Retrieve the full record (FR-3) | `200` same body as `201` | `404 RESOURCE_NOT_FOUND` |
-| `GET` | `/healthz`, `/metrics` | Liveness; Prometheus exposition | `200` | — |
+| `GET` | `/healthz`, `/readyz`, `/metrics` | Liveness; readiness (database ping); Prometheus exposition | `200` (`503` when not ready) | — |
 
 Error body: `{"code": "...", "message": "...", "conflicting": [...]?, "details": {field: reason}?}`.
 Every response carries `X-Correlation-ID` (echoed from the request or generated).
@@ -170,5 +170,5 @@ with the three exclusion constraints and the booking transaction.
 
 **Process observations.** "Tests first" was followed at the commit level, but tests and
 implementation were written minutes apart by the same author with the design already fixed, so the
-red→green signal is weaker than it looks; judge the tests on content. The commit count (~55) overshot
+red→green signal is weaker than it looks; judge the tests on content. The commit count (~66) overshot
 the requested 25–40 because doc updates were committed per phase as instructed.

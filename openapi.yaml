@@ -8,6 +8,12 @@ info:
     Backend for booking dealership workshop appointments with automatic technician and bay
     assignment. Contract source: `docs/requirements.md` §10.
 
+    Notes
+    * Concurrency: with one qualifying bay and technician, N concurrent requests for one slot yield
+      exactly one `201`; the losers receive `409 NO_AVAILABLE_RESOURCE`. If the losers also share the
+      *vehicle* with the winner, `409 VEHICLE_ALREADY_BOOKED` is reported first (INV-3 takes precedence).
+    * Booking accepts any exact start instant within hours (not only the 30-minute availability grid).
+
     Conventions
     * All timestamps are ISO-8601 with an explicit offset. Responses use the dealership's local
       offset regardless of the offset the client sent.
