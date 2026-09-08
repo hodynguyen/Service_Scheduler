@@ -308,4 +308,4 @@ Written by the AI agent immediately after each phase. Unedited. Accuracy over to
   - The three precedence/semantics choices above (INV-3 in availability, AC-18 wording, FR-4 scope).
   - INV-4/INV-5 database enforcement.
   - Performance under real contention against the 200 ms p95 NFR — no benchmark exists.
-- Commit count at the end: 66 (requested 25–40). See Phase 7 for why I did not squash.
+- Commit count at the end: 62 (requested 25–40). See Phase 7 for why I did not squash.
