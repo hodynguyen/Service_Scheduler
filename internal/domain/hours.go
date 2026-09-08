@@ -94,3 +94,11 @@ func ValidateBookingTime(start time.Time, duration time.Duration, now time.Time,
 	}
 	return iv, nil
 }
+
+// Bounds returns the absolute [midnight, next midnight) interval of the civil
+// date in loc. It is the range used to decide which appointments belong to
+// "that date" for BR-6 load counting.
+func (d Date) Bounds(loc *time.Location) Interval {
+	start := time.Date(d.Year, d.Month, d.Day, 0, 0, 0, 0, loc)
+	return Interval{Start: start, End: time.Date(d.Year, d.Month, d.Day+1, 0, 0, 0, 0, loc)}
+}
