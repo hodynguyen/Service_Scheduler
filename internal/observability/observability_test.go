@@ -257,7 +257,7 @@ func TestTracingMiddleware_CreatesServerSpanNamedByRouteAndPropagatesContext(t *
 	var status string
 	for _, a := range server.Attributes {
 		if string(a.Key) == "http.response.status_code" {
-			status = a.Value.Emit()
+			status = a.Value.String()
 		}
 	}
 	if status != "409" {

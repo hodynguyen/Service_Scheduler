@@ -57,7 +57,7 @@ func TestAssign_AC07_VehicleWithOverlappingActiveAppointmentIsRejected(t *testin
 	s := schedule(nil, nil)
 	s.VehicleBooked = []Interval{iv(monday, 9, 0, 30*time.Minute)}
 	_, err := Assign(s, svcAlignment, iv(monday, 9, 15, time.Hour), policy)
-	expectCode(t, err, CodeVehicleAlreadyBooked)
+	_ = expectCode(t, err, CodeVehicleAlreadyBooked)
 }
 
 func TestAssign_AC07_VehicleCheckWinsOverResourceConflict(t *testing.T) {
@@ -65,7 +65,7 @@ func TestAssign_AC07_VehicleCheckWinsOverResourceConflict(t *testing.T) {
 	s := schedule(map[string][]Interval{techChi.ID: busy}, map[string][]Interval{bayEV.ID: busy})
 	s.VehicleBooked = busy
 	_, err := Assign(s, svcEV, iv(monday, 9, 0, 90*time.Minute), policy)
-	expectCode(t, err, CodeVehicleAlreadyBooked)
+	_ = expectCode(t, err, CodeVehicleAlreadyBooked)
 }
 
 func TestAssign_AC08_FreeButUnqualifiedTechnicianIsNotAssigned(t *testing.T) {

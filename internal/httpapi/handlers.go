@@ -76,8 +76,8 @@ func (h *handlers) createAppointment(w http.ResponseWriter, r *http.Request) {
 	requireUUID(details, "vehicleId", body.VehicleID)
 	requireUUID(details, "serviceTypeId", body.ServiceTypeID)
 	var start time.Time
-	switch {
-	case body.StartTime == "":
+	switch body.StartTime {
+	case "":
 		details["startTime"] = "required"
 	default:
 		t, err := time.Parse(time.RFC3339, body.StartTime)

@@ -161,18 +161,18 @@ func TestBooking_FR3_GetAppointmentReturnsFullRecord(t *testing.T) {
 		t.Fatalf("GetAppointment = %+v\nwant %+v", got, created)
 	}
 	_, err = h.svc.GetAppointment(h.ctx, "00000000-0000-4000-8000-00000000dead")
-	expectCode(t, err, domain.CodeResourceNotFound)
+	_ = expectCode(t, err, domain.CodeResourceNotFound)
 }
 
 func TestBooking_UnknownReferencesAreNotFound(t *testing.T) {
 	h := newHarness(t)
 	unknown := "00000000-0000-4000-8000-00000000dead"
 	_, err := h.svc.Book(h.ctx, service.BookRequest{DealershipID: unknown, VehicleID: postgres.SeedVehicleCamryID, ServiceTypeID: postgres.SeedServiceTypeOilChangeID, StartTime: local(monday, 9, 0)})
-	expectCode(t, err, domain.CodeResourceNotFound)
+	_ = expectCode(t, err, domain.CodeResourceNotFound)
 	_, err = h.book(unknown, postgres.SeedServiceTypeOilChangeID, local(monday, 9, 0))
-	expectCode(t, err, domain.CodeResourceNotFound)
+	_ = expectCode(t, err, domain.CodeResourceNotFound)
 	_, err = h.book(postgres.SeedVehicleCamryID, unknown, local(monday, 9, 0))
-	expectCode(t, err, domain.CodeResourceNotFound)
+	_ = expectCode(t, err, domain.CodeResourceNotFound)
 }
 
 func TestBooking_BR7_VehicleFromAnotherDealershipIsNotFound(t *testing.T) {
@@ -189,7 +189,7 @@ func TestBooking_BR7_VehicleFromAnotherDealershipIsNotFound(t *testing.T) {
 		_, _ = h.pool.Exec(h.ctx, `DELETE FROM dealership WHERE id = $1`, otherDealership)
 	})
 	_, err := h.book(otherVehicle, postgres.SeedServiceTypeOilChangeID, local(monday, 9, 0))
-	expectCode(t, err, domain.CodeResourceNotFound)
+	_ = expectCode(t, err, domain.CodeResourceNotFound)
 }
 
 // --- Resource conflicts ---------------------------------------------------
@@ -226,7 +226,7 @@ func TestBooking_AC07_VehicleWithOverlappingAppointmentIsRejected(t *testing.T) 
 	h.mustBook(t, postgres.SeedVehicleCamryID, postgres.SeedServiceTypeOilChangeID, local(monday, 9, 0))
 	// Plenty of free resources for a second oil change; the vehicle is the problem.
 	_, err := h.book(postgres.SeedVehicleCamryID, postgres.SeedServiceTypeOilChangeID, local(monday, 9, 15))
-	expectCode(t, err, domain.CodeVehicleAlreadyBooked)
+	_ = expectCode(t, err, domain.CodeVehicleAlreadyBooked)
 	if h.confirmedCount(t) != 1 {
 		t.Fatal("rejected booking must not write anything")
 	}
@@ -282,33 +282,33 @@ func TestBooking_AC12_OneMinuteOverlapIsRejected(t *testing.T) {
 	de := expectCode(t, err, domain.CodeNoAvailableResource)
 	expectConflicting(t, de, domain.ResourceBay, domain.ResourceTechnician)
 	_, err = h.book(postgres.SeedVehicleVF8ID, postgres.SeedServiceTypeAlignmentID, local(monday, 8, 1))
-	expectCode(t, err, domain.CodeNoAvailableResource)
+	_ = expectCode(t, err, domain.CodeNoAvailableResource)
 }
 
 func TestBooking_AC13_StartBeforeOpeningIsOutsideBusinessHours(t *testing.T) {
 	h := newHarness(t)
 	_, err := h.book(postgres.SeedVehicleCamryID, postgres.SeedServiceTypeOilChangeID, local(monday, 7, 30))
-	expectCode(t, err, domain.CodeOutsideBusinessHours)
+	_ = expectCode(t, err, domain.CodeOutsideBusinessHours)
 }
 
 func TestBooking_AC14_EndingAfterClosingIsServiceExceedsClosingTime(t *testing.T) {
 	h := newHarness(t)
 	_, err := h.book(postgres.SeedVehicleCamryID, postgres.SeedServiceTypeAlignmentID, local(monday, 16, 30))
-	expectCode(t, err, domain.CodeServiceExceedsClosingTime)
+	_ = expectCode(t, err, domain.CodeServiceExceedsClosingTime)
 	h.mustBook(t, postgres.SeedVehicleCamryID, postgres.SeedServiceTypeAlignmentID, local(monday, 16, 0)) // ends exactly at 17:00
 }
 
 func TestBooking_AC15_ClosedDayIsRejected(t *testing.T) {
 	h := newHarness(t)
 	_, err := h.book(postgres.SeedVehicleCamryID, postgres.SeedServiceTypeOilChangeID, local(sunday, 9, 0))
-	expectCode(t, err, domain.CodeOutsideBusinessHours)
+	_ = expectCode(t, err, domain.CodeOutsideBusinessHours)
 }
 
 func TestBooking_AC16_StartInPastIsRejected(t *testing.T) {
 	h := newHarness(t)
 	h.clock.Set(local(monday, 10, 0))
 	_, err := h.book(postgres.SeedVehicleCamryID, postgres.SeedServiceTypeOilChangeID, local(monday, 9, 0))
-	expectCode(t, err, domain.CodeStartTimeInPast)
+	_ = expectCode(t, err, domain.CodeStartTimeInPast)
 }
 
 // --- Cancellation semantics -----------------------------------------------
@@ -495,7 +495,7 @@ func TestBooking_AC19_IdempotencyKeyIsScopedPerDealership(t *testing.T) {
 	b := base
 	b.IdempotencyKey = "8d2c8a52-1b1e-4c65-9b26-000000000012"
 	_, err := h.svc.Book(h.ctx, b)
-	expectCode(t, err, domain.CodeVehicleAlreadyBooked)
+	_ = expectCode(t, err, domain.CodeVehicleAlreadyBooked)
 }
 
 func TestBooking_AC19_SameKeyDifferentPayloadIsRejected(t *testing.T) {
@@ -506,7 +506,7 @@ func TestBooking_AC19_SameKeyDifferentPayloadIsRejected(t *testing.T) {
 	}
 	req.StartTime = local(monday, 10, 0)
 	_, err := h.svc.Book(h.ctx, req)
-	expectCode(t, err, domain.CodeIdempotencyKeyReused)
+	_ = expectCode(t, err, domain.CodeIdempotencyKeyReused)
 	if h.confirmedCount(t) != 1 {
 		t.Fatal("a reused key must not create a second appointment")
 	}
@@ -669,9 +669,9 @@ func TestAvailability_ClosedDayReturnsEmptyArrayNotError(t *testing.T) {
 func TestAvailability_InvalidDateAndUnknownIdsAreDomainErrors(t *testing.T) {
 	h := newHarness(t)
 	_, err := h.svc.Availability(h.ctx, service.AvailabilityQuery{DealershipID: postgres.SeedDealershipID, ServiceTypeID: postgres.SeedServiceTypeOilChangeID, Date: "04/03/2030"})
-	expectCode(t, err, domain.CodeValidationError)
+	_ = expectCode(t, err, domain.CodeValidationError)
 	_, err = h.svc.Availability(h.ctx, service.AvailabilityQuery{DealershipID: postgres.SeedDealershipID, ServiceTypeID: "00000000-0000-4000-8000-00000000dead", Date: "2030-03-04"})
-	expectCode(t, err, domain.CodeResourceNotFound)
+	_ = expectCode(t, err, domain.CodeResourceNotFound)
 	if !errors.Is(err, err) { // keep errors imported for readers extending this file
 		t.Fatal("unreachable")
 	}
