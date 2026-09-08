@@ -238,3 +238,38 @@ Written by the AI agent immediately after each phase. Unedited. Accuracy over to
 - Anything I got wrong first and had to correct:
   - `go mod tidy` run before the implementation existed dropped the OTLP exporter module (only test
     files existed); it was re-added when `tracing.go` landed. No functional impact.
+
+## Phase 7 — Documentation   (2026-09-09 ~09:00 +07:00)
+- Decisions I made that the spec did not dictate:
+  - `openapi.yaml` documents the *implemented* API including additions (`vehicleId` on
+    availability, `IDEMPOTENCY_KEY_REUSED`, `X-Correlation-ID`, `Location`, `/healthz`), and declares
+    `security: []` explicitly because auth is out of scope (§5.2). Validated with `redocly lint`
+    (two remaining warnings: localhost server URL; acceptable for a local stack).
+  - ADR format is Context / Decision / Alternatives considered / Consequences as requested; each
+    alternative has a one-line reason for rejection rather than a discussion.
+  - `system-design.md` includes an ER diagram in addition to the required flowchart and sequence
+    diagram, and a "what you would alert on" paragraph under observability.
+  - CI: `golangci-lint` via the official action with `latest`; unit (`-short`) and full integration
+    runs as separate steps so a Docker problem on the runner is distinguishable from a code failure;
+    `TESTCONTAINERS_RYUK_DISABLED=true` on CI because Ryuk sometimes cannot bind on shared runners.
+    I have **not** run this workflow — no push has happened yet at the time of writing.
+  - README's cURL examples use the seeded identifiers and 2030 dates; every example was executed
+    against the compose stack before being written down.
+- Alternatives I considered and rejected, with reasons:
+  - Generating `openapi.yaml` from code (swag/oapi-codegen): rejected; three endpoints, and a
+    hand-written contract reads better. The risk is drift, mitigated by the handler tests that pin
+    body shapes and by linting the file in CI.
+  - Bundling Prometheus/Grafana/OTel collector into compose for the "observability strategy": rejected
+    to keep the quickstart at two commands; the strategy is documented instead.
+- Where I was uncertain or guessing:
+  - Whether the reviewer wants the GenAI section to be more or less self-critical. I erred on
+    specific over flattering, as instructed.
+  - Commit count: 55 at this point versus the requested 25–40. Per-phase log commits and splitting
+    tests from implementation pushed it over. I chose not to squash because the ordering (tests
+    before implementation) is part of what was asked for.
+- What I could not verify myself (needs human check):
+  - GitHub Actions run (see above). `golangci-lint` was not installed locally when the code was
+    written; it is run once locally in the final step, results in the final summary.
+  - Mermaid rendering of the three diagrams on GitHub (syntax checked by eye only).
+- Anything I got wrong first and had to correct:
+  - First `openapi.yaml` used `example: {$ref: …}` (invalid) and lacked operationIds; fixed after lint.
