@@ -169,9 +169,28 @@ func TestSchema_INV7_ResourcesMustBelongToAppointmentDealership(t *testing.T) {
 	}
 	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM technician WHERE id = $1`, otherTech) })
 
-	_, err := insertAppointment(t, SeedVehicleCamryID, otherTech, SeedBay1ID, t0900, t1000, "CONFIRMED")
-	var pgErr *pgconn.PgError
-	if !errors.As(err, &pgErr) || pgErr.Code != "23503" {
-		t.Fatalf("technician from another dealership must violate a foreign key (INV-7), got %v", err)
+	var otherBay, otherVehicle string
+	if err := pool.QueryRow(ctx, `INSERT INTO service_bay (dealership_id, name, bay_type) VALUES ($1, 'Far bay', 'GENERAL') RETURNING id`, otherDealership).Scan(&otherBay); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `INSERT INTO vehicle (dealership_id, customer_id, vin, model) VALUES ($1, $2, 'FARVIN00000000001', 'Mini') RETURNING id`, otherDealership, SeedCustomerMaiID).Scan(&otherVehicle); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM vehicle WHERE id = $1`, otherVehicle)
+		_, _ = pool.Exec(ctx, `DELETE FROM service_bay WHERE id = $1`, otherBay)
+	})
+
+	cases := map[string]struct{ vehicle, tech, bay string }{
+		"technician": {SeedVehicleCamryID, otherTech, SeedBay1ID},
+		"bay":        {SeedVehicleCamryID, SeedTechnicianAnID, otherBay},
+		"vehicle":    {otherVehicle, SeedTechnicianAnID, SeedBay1ID},
+	}
+	for name, c := range cases {
+		_, err := insertAppointment(t, c.vehicle, c.tech, c.bay, t0900, t1000, "CONFIRMED")
+		var pgErr *pgconn.PgError
+		if !errors.As(err, &pgErr) || pgErr.Code != "23503" {
+			t.Fatalf("%s from another dealership must violate a foreign key (INV-7), got %v", name, err)
+		}
 	}
 }

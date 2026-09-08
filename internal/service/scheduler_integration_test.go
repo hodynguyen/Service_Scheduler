@@ -482,10 +482,11 @@ func TestBooking_AC19_SameIdempotencyKeyReturnsTheFirstResult(t *testing.T) {
 	}
 }
 
-func TestBooking_AC19_IdempotencyKeyIsScopedPerDealership(t *testing.T) {
+func TestBooking_AC19_DifferentKeysAreIndependentAttempts(t *testing.T) {
 	h := newHarness(t)
-	// A different key for the same payload creates a second, distinct rejection or success —
-	// here the second key sees the vehicle busy, proving the key (not the payload) is what replays.
+	// A different key for the same payload is a genuine second attempt: it sees the vehicle busy,
+	// proving the key (not the payload) is what replays. Dealership scoping and expiry are tested
+	// at the repository level (TestIdempotency_* in repository/postgres).
 	base := service.BookRequest{DealershipID: postgres.SeedDealershipID, VehicleID: postgres.SeedVehicleCamryID, ServiceTypeID: postgres.SeedServiceTypeOilChangeID, StartTime: local(monday, 9, 0)}
 	a := base
 	a.IdempotencyKey = "8d2c8a52-1b1e-4c65-9b26-000000000011"
