@@ -27,3 +27,40 @@ Written by the AI agent immediately after each phase. Unedited. Accuracy over to
   - Nothing yet; `docker compose up` is verified in the final step.
 - Anything I got wrong first and had to correct:
   - Nothing in this phase.
+
+## Phase 2 — Schema and seed   (2026-09-09 ~04:40 +07:00)
+- Decisions I made that the spec did not dictate:
+  - `weekday` numbering 0=Sunday..6=Saturday (Go `time.Weekday` and Postgres `DOW` agree). A missing
+    row means closed. Spec only says "weekly business hours".
+  - INV-7 is enforced in the database with composite foreign keys `(resource_id, dealership_id)`.
+    The spec only says it must hold; nothing required DB enforcement. It costs three UNIQUE indexes.
+  - `service_type`, `skill`, `customer` are global (not per dealership). Glossary calls service
+    types "a catalogue entry"; I read that as shared. Vehicle carries `dealership_id` because BR-7
+    names the vehicle explicitly.
+  - Enums `bay_type` and `appointment_status` as Postgres ENUM types rather than text+CHECK. Adding
+    a value later needs `ALTER TYPE … ADD VALUE`, which is cheap.
+  - `idempotency_key` stores the *outcome* (appointment id, or error code + conflicting list), not
+    an HTTP body, so the repository knows nothing about HTTP. A CHECK constraint keeps the two
+    shapes consistent. Expiry is a column; there is no cleanup job (see review-notes).
+  - Seed uses fixed, sortable UUIDs (`10…01` dealership, `20…` skills, `30…` service types,
+    `40…` bays, `50…` technicians, `60…` customers, `70…` vehicles). Real systems would not; here
+    predictability matters for BR-6 tie-break tests and cURL examples.
+  - Test fixture: one Postgres container per test package via TestMain; each test TRUNCATEs
+    `appointment, idempotency_key`. Tests inside a package run sequentially, so this is safe.
+- Alternatives I considered and rejected, with reasons:
+  - Separate migrations per table: rejected, one file is easier to read for a reviewer looking for
+    the three constraints.
+  - Storing business hours as minutes-since-midnight integers: rejected in favour of `time` columns
+    because the seed reads naturally; conversion in Go is trivial.
+  - A trigger to enforce INV-4/INV-5 (skill and bay type match) in the database: not done. Those
+    need a join and the spec only mandates DB enforcement for INV-1..3. The candidate filter in the
+    domain is the enforcement point; a reviewer may reasonably want a trigger here.
+- Where I was uncertain or guessing:
+  - Whether the pg `uuid` sort order matches Go string comparison of the canonical form. It does
+    (bytewise on the 16 bytes == lexical on lowercase hex), but I did not add a test for it.
+- What I could not verify myself (needs human check):
+  - Nothing beyond what the schema tests cover; `go test ./internal/repository/postgres/` passed
+    locally in ~16 s including container start.
+- Anything I got wrong first and had to correct:
+  - go.mod was written as `go 1.24`; `go get testcontainers-go@v0.44.0` bumped it to 1.25.0.
+    CLAUDE.md said "1.24+" for one commit; corrected.
