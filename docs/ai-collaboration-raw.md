@@ -165,3 +165,39 @@ Written by the AI agent immediately after each phase. Unedited. Accuracy over to
     does not compile. Fixed the test to compare ids/names (amended into the test commit before push).
   - Nothing else: the 35 service integration tests passed on the first run of the implementation,
     including AC-18 ×3 under `-race`. Same caveat as Phase 3 — I wrote tests and code back to back.
+
+## Phase 5 — HTTP   (2026-09-09 ~07:20 +07:00)
+- Decisions I made that the spec did not dictate:
+  - Error body shape: flat `{"code","message","conflicting"?,"details"?}`. §10 names the code and
+    "the `conflicting` array" but never shows an error body. `details` is a field→reason map for
+    400s. I did not wrap in `{"error": …}`.
+  - Unknown JSON fields are rejected (400). Rationale: BR-8 says clients cannot supply duration; a
+    silently ignored `durationMinutes` would let a client believe it had. This is stricter than most
+    APIs and will break clients that send extra fields.
+  - Malformed `{id}` on `GET /appointments/{id}` is 404, not 400 — §10.3 says "404 if unknown" and a
+    non-UUID cannot name an appointment. Malformed ids in the body/query are 400.
+  - Replayed idempotent requests return 201 again (same status, same body). No `Idempotent-Replayed`
+    header; the service does not expose the distinction.
+  - Optional `vehicleId` query parameter on `GET /availability` (not in §10.1) so INV-3 can be part
+    of AC-22. Without it, availability ignores the vehicle.
+  - `Location` header on 201; `/healthz`; chi `Recoverer` and a 30 s request timeout; 64 KiB body cap.
+  - Timestamps are rendered with the dealership's offset by giving the `time.Time` the dealership's
+    location in the repository. A client sending `…Z` gets `…+07:00` back (tested).
+  - Handlers lowercase UUIDs before calling the service so key/lookup comparisons are canonical.
+  - Package renamed `internal/http` → `internal/httpapi` to stop shadowing `net/http`.
+  - Server: env config (`internal/config`), 30 s connection-retry loop, migrate+seed on boot, SIGTERM drain.
+- Alternatives I considered and rejected, with reasons:
+  - A validation library: rejected; three endpoints, hand-written checks with a `details` map are
+    clearer and dependency-free.
+  - Doing date parsing only in the service (it already validates): kept a syntactic regex in the
+    handler too, so the 400 carries a per-field `details` entry. Double validation, accepted.
+- Where I was uncertain or guessing:
+  - Whether "404 for malformed path id" is what the reviewer expects (some teams want 400).
+  - Whether unknown-field rejection is too strict for the reviewer's taste.
+- What I could not verify myself (needs human check):
+  - `docker compose up` end-to-end is deferred to the final step; the server binary compiles and the
+    same wiring is exercised by the E2E tests through `httptest`.
+- Anything I got wrong first and had to correct:
+  - The `git mv` of `internal/http` plus my commit helper produced one commit mixing the rename and
+    the handler tests; I reset and re-committed them separately before pushing.
+  - gofmt flagged the handler test file twice (alignment in table literals); fixed before commit.
