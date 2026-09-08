@@ -27,7 +27,9 @@ func SetPropagators() {
 // spans are still created (so trace ids appear in logs) but dropped.
 func SetupTracing(ctx context.Context, serviceName, otlpEndpoint string) (func(context.Context) error, error) {
 	SetPropagators()
-	res, err := resource.Merge(resource.Default(), resource.NewWithAttributes(semconv.SchemaURL, semconv.ServiceName(serviceName)))
+	// NewSchemaless: the SDK's default resource carries a newer schema URL than
+	// the semconv package used for attribute keys; merging two schema URLs fails.
+	res, err := resource.Merge(resource.Default(), resource.NewSchemaless(semconv.ServiceName(serviceName)))
 	if err != nil {
 		return nil, fmt.Errorf("otel resource: %w", err)
 	}
