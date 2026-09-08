@@ -24,7 +24,7 @@ test-unit: ## Run only the fast, Docker-free tests
 	$(GO) test -race -short -count=1 $(PKG)
 
 test-integration: ## Run only the testcontainers-backed tests
-	$(GO) test -race -count=1 -run 'Integration|AC18|AC19' ./internal/repository/... ./internal/http/...
+	$(GO) test -race -count=1 -run 'Integration|AC18|AC19' ./internal/repository/... ./internal/httpapi/...
 
 lint: vet ## Static analysis (golangci-lint if installed, otherwise go vet + gofmt check)
 	@if command -v golangci-lint >/dev/null 2>&1; then golangci-lint run ./...; else echo "golangci-lint not installed; ran go vet + gofmt only"; fi
