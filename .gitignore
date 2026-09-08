@@ -1,0 +1,26 @@
+# Binaries and build output
+/bin/
+/dist/
+*.exe
+*.test
+*.out
+coverage.*
+
+# Go tooling
+/vendor/
+
+# Local environment
+.env
+.env.*
+!.env.example
+
+# Editors / OS
+.idea/
+.vscode/
+.DS_Store
+
+# Assessment PDFs and other local documents are not part of the deliverable
+*.pdf
+
+# Local workflow state
+.hody/
