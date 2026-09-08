@@ -2,6 +2,8 @@ openapi: 3.0.3
 info:
   title: Unified Service Scheduler API
   version: 1.0.0
+  license:
+    name: Proprietary — technical assessment
   description: |
     Backend for booking dealership workshop appointments with automatic technician and bay
     assignment. Contract source: `docs/requirements.md` §10.
@@ -14,14 +16,20 @@ info:
     * Errors share one body shape (`ErrorResponse`).
 servers:
   - url: http://localhost:8080/api/v1
+    description: docker compose stack
+# Authentication is explicitly out of scope (requirements.md §5.2).
+security: []
 tags:
   - name: Availability
+    description: Advisory query of bookable start times (FR-1).
   - name: Appointments
+    description: Atomic booking with automatic assignment and retrieval (FR-2, FR-3, FR-4).
 
 paths:
   /availability:
     get:
       tags: [Availability]
+      operationId: getAvailability
       summary: List bookable start times for a service type on a date (FR-1)
       description: |
         Slots are generated every 30 minutes within the dealership's business hours for that
@@ -74,6 +82,7 @@ paths:
   /appointments:
     post:
       tags: [Appointments]
+      operationId: createAppointment
       summary: Book an appointment with automatic resource assignment (FR-2, FR-4)
       description: |
         The client supplies **what** and **when**; the system chooses **who** (technician) and
@@ -116,7 +125,8 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Appointment' }
-              example: { $ref: '#/components/examples/AppointmentExample/value' }
+              examples:
+                confirmed: { $ref: '#/components/examples/AppointmentExample' }
         '400': { $ref: '#/components/responses/ValidationError' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409':
@@ -157,6 +167,7 @@ paths:
   /appointments/{id}:
     get:
       tags: [Appointments]
+      operationId: getAppointment
       summary: Retrieve an appointment (FR-3)
       parameters:
         - $ref: '#/components/parameters/CorrelationID'
@@ -173,7 +184,8 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Appointment' }
-              example: { $ref: '#/components/examples/AppointmentExample/value' }
+              examples:
+                confirmed: { $ref: '#/components/examples/AppointmentExample' }
         '404': { $ref: '#/components/responses/NotFound' }
         '500': { $ref: '#/components/responses/InternalError' }
 
