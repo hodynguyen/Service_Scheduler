@@ -1,4 +1,4 @@
-package postgres
+package postgres_test
 
 import (
 	"context"
@@ -8,6 +8,9 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
+
+	. "github.com/hodynguyen/service-scheduler/internal/repository/postgres"
+	"github.com/hodynguyen/service-scheduler/internal/testutil/pgtest"
 )
 
 // These tests exercise the schema directly with SQL. They prove that the
@@ -75,7 +78,7 @@ func TestSchema_INV1to3_ExclusionConstraintsArePartialOnConfirmed(t *testing.T) 
 func insertAppointment(t *testing.T, vehicle, tech, bay string, start, end time.Time, status string) (string, error) {
 	t.Helper()
 	var id string
-	err := testPool.QueryRow(context.Background(), `
+	err := pgtest.Pool(t).QueryRow(context.Background(), `
 		INSERT INTO appointment (dealership_id, vehicle_id, customer_id, service_type_id, technician_id, bay_id, start_time, end_time, status)
 		VALUES ($1, $2, (SELECT customer_id FROM vehicle WHERE id = $2), $3, $4, $5, $6, $7, $8)
 		RETURNING id`,
