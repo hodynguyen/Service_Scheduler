@@ -309,3 +309,8 @@ Written by the AI agent immediately after each phase. Unedited. Accuracy over to
   - INV-4/INV-5 database enforcement.
   - Performance under real contention against the 200 ms p95 NFR — no benchmark exists.
 - Commit count at the end: 62 (requested 25–40). See Phase 7 for why I did not squash.
+- Push to `origin main` was attempted at the end and **failed for lack of credentials**: the `gh`
+  token on this machine is invalid, no SSH key is registered with GitHub, and the keychain refused
+  non-interactive access. The 63 commits exist locally on `main`; a human must run
+  `gh auth login -h github.com` (or add an SSH key) and `git push origin main`. GitHub Actions has
+  therefore still not run.
