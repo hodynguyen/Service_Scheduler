@@ -8,7 +8,7 @@ returns a confirmed appointment. Go 1.25 · chi · pgx · PostgreSQL 16 · Prome
 * Design: [`docs/system-design.md`](docs/system-design.md) · ADRs: [`docs/adr/`](docs/adr/)
 * API contract: [`openapi.yaml`](openapi.yaml)
 * AI collaboration: [narrative below](#ai-collaboration-narrative), raw log
-  [`docs/ai-collaboration-raw.md`](docs/ai-collaboration-raw.md), reviewer pointers
+  [`docs/ai-collaboration-raw.md`](docs/ai-collaboration-raw.md), risk areas
   [`docs/risk-areas.md`](docs/risk-areas.md)
 
 ## Quickstart (two commands)
@@ -27,10 +27,10 @@ Requirements: Docker with Compose v2; Go 1.25+ only if you want to run tests or 
 | Invariant | Enforcement |
 |---|---|
 | INV-1..3 no overlapping active appointments per bay / technician / vehicle | PostgreSQL **exclusion constraints** on `tstzrange(start,end,'[)')`, partial on `status='CONFIRMED'` (`btree_gist`). Application checks only produce precise error messages. |
-| INV-4/5 technician holds the skill, bay has the type | Candidate filter in the domain (`domain.Assign`) |
+| INV-4/5 technician holds the skill, bay has the type | PostgreSQL **composite foreign keys** on denormalised `appointment.required_skill_id` / `required_bay_type`, pinned to the service type (migration 0002). The candidate filter in `domain.Assign` is the first line of defence, not the guarantee. |
 | INV-6 inside business hours | `domain.ValidateBookingTime` in the dealership's IANA zone |
 | INV-7 same dealership | Composite foreign keys `(resource_id, dealership_id)` |
-| Atomic creation, idempotent retries (FR-4) | One transaction: advisory lock on the key → select → insert in a savepoint → record outcome |
+| Atomic creation, idempotent retries (FR-4) | One transaction: idempotency-key advisory lock → per-dealership-day advisory lock → select candidates → insert in a savepoint → retry on a lost race → record the outcome |
 
 Layering is `httpapi → service → domain`, with `repository/postgres` behind consumer-defined ports.
 No ORM, no business logic in handlers or SQL, assignment policy behind `domain.AssignmentPolicy`.
@@ -127,7 +127,7 @@ internal/repository/postgres/  pgx repository, embedded migrations + seed, const
 internal/httpapi/              chi router, validation, DTOs, §10 error mapping
 internal/observability/        slog JSON + correlation, Prometheus, OpenTelemetry
 internal/testutil/pgtest/      shared testcontainers Postgres for integration tests
-docs/                          requirements, system design, ADRs, AI log, review notes
+docs/                          requirements, system design, ADRs, AI log, risk areas
 ```
 
 ## Testing strategy
@@ -138,7 +138,7 @@ coverage of the specification is greppable: `grep -rn "AC18" --include=*_test.go
 | Layer | Package | What it proves | DB |
 |---|---|---|---|
 | Schema | `repository/postgres` (`schema_test.go`) | The database alone rejects overlapping CONFIRMED rows (SQLSTATE 23P01 with the right constraint), allows adjacency, ignores CANCELLED, enforces INV-7 | real |
-| Domain | `domain` | AC-01..AC-17, AC-20..AC-24 on an in-memory schedule: half-open overlap, hours/DST-safe windows, qualification, deterministic policy, availability | none |
+| Domain | `domain` | AC-01..AC-17, AC-20..AC-24 on an in-memory schedule: half-open overlap, business-hour windows evaluated in the dealership zone (DST transitions untested — risk item 7), qualification, deterministic policy, availability | none |
 | Service | `service` | AC-01..AC-24 through the real service + repository, incl. **AC-18** (20 concurrent requests for the single EV bay/technician → exactly one 201, N−1 `NO_AVAILABLE_RESOURCE`, brute-force overlap check), a spare-resource race that must not be spuriously rejected, and AC-19 replay / scoping / mismatch / same-key concurrency | real |
 | HTTP | `httpapi` | Handler contract against a fake service (validation cases, status mapping, body shape) and end-to-end through the router with the real stack, including a trace-span chain assertion | fake + real |
 | Observability | `observability` | Correlation propagation, JSON log fields, metric names/labels, route-pattern labelling, server span naming and `traceparent` handling | none |

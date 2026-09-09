@@ -191,7 +191,7 @@ Dependency list (direct): chi, pgx, testcontainers-go (+ postgres module), prome
 | Correlation | `X-Correlation-ID` reused from the client or generated (128-bit hex), echoed on every response, attached to the server span | `CorrelationMiddleware` |
 | Metrics | `scheduler_bookings_attempted_total`, `scheduler_bookings_confirmed_total`, `scheduler_bookings_rejected_total{reason}`, `scheduler_booking_duration_seconds` (booking path), `http_server_request_duration_seconds{method,route,status}`, `http_server_requests_in_flight`, Go/process collectors; scraped at `/metrics` | `internal/observability/metrics.go`, `service.Instrumentation` port |
 | Traces | `POST /api/v1/appointments` (SERVER) → `scheduler.Book` → `repository.Transaction` → `repository.DaySchedule` → `policy.Assign` (per attempt, with candidate counts, chosen ids, outcome) → `repository.InsertAppointment` (`lost_race` attribute when the DB rejected). W3C `traceparent` honoured | `internal/observability/tracing.go`, spans in service and repository |
-| Health | `GET /healthz` | router |
+| Health | `GET /healthz` (liveness) and `GET /readyz` (readiness: database ping) | router |
 
 What you would alert on: rejected-by-reason rate spikes (capacity or data problem), p95 of
 `scheduler_booking_duration_seconds` against the 200 ms NFR, 5xx rate, and `lost_race` frequency in
@@ -211,15 +211,20 @@ scoping beyond `dealership_id` on every query.
 
 ## 7. GenAI use during design
 
-This system was designed and implemented with an AI coding agent (Claude) working from
-`requirements.md`. What the model contributed and where it was kept in check:
+`requirements.md` was written by the engineer before any code and is the input to the whole build;
+everything downstream of it was designed and implemented with an AI coding agent (Claude) working
+from that specification. What the model contributed and where it was kept in check:
 
 * **Where GenAI was used** — turning the FR/BR/INV/AC lists into a package layout, a schema, test
-  cases named after acceptance criteria, the transaction protocol (advisory lock → select → savepoint
-  insert → retry), the observability wiring, and every document in this repository. Commit
-  granularity and test-before-implementation ordering were also produced by the agent.
+  cases named after acceptance criteria, the transaction protocol (idempotency-key lock →
+  per-dealership-day lock → select → savepoint insert → retry), the observability wiring, and every
+  document in this repository except `requirements.md`. Commit granularity and
+  test-before-implementation ordering were also produced by the agent.
 * **Where it needed judgement calls** the specification did not make — slot granularity (30 min),
-  a required `vehicleId` on availability (added after human review so INV-3 is always applied), error precedence (vehicle before resources; past before hours), the flat error body, strict JSON
+  a required `vehicleId` on availability (added after human review so INV-3 is always applied),
+  error precedence (the agent chose vehicle before resources; changed at review to resource before
+  vehicle so AC-18 holds literally — identical concurrent requests for the last slot all receive
+  `NO_AVAILABLE_RESOURCE`; past still precedes hours), the flat error body, strict JSON
   (unknown fields rejected), 404 for malformed path ids, storing rejections under idempotency keys,
   and the retry-on-lost-race behaviour. Each is recorded, with the reasoning and the counter-argument, in
   [`ai-collaboration-raw.md`](./ai-collaboration-raw.md) so a human can overturn it deliberately.
@@ -227,9 +232,11 @@ This system was designed and implemented with an AI coding agent (Claude) workin
   inside docker compose (schema-URL conflict). Unit tests had not covered that path; the running
   stack exposed it, a failing test was added, then the fix. One test compared structs containing
   slices. Both are logged.
-* **What a human still has to check** — the list in [`risk-areas.md`](./risk-areas.md):
-  the three constraints, the transaction, error precedence, idempotency semantics, DST behaviour,
-  and the fact that INV-4/5 are not database-enforced.
+* **What a human still has to check** — the list in [`risk-areas.md`](./risk-areas.md): the three
+  constraints, the transaction and its retry budget, error precedence, idempotency semantics, the
+  RESTRICT cost of the INV-4/INV-5 foreign keys (decertifying a technician or retyping a bay is
+  blocked while any appointment references the old value — risk item 8), and DST behaviour, which
+  is reasoned about but untested because the seeded zone has none (risk item 7).
 * **Method** — spec as the single source of truth, acceptance-criteria-named tests written and
   committed before implementation, a real database in tests rather than mocks for anything touching
   the constraints, and a running log written after each phase rather than a retrospective.
