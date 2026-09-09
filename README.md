@@ -148,26 +148,68 @@ truncate mutable tables between tests; `-short` skips them. CI runs both modes o
 
 ## AI Collaboration Narrative
 
-This repository was produced with an AI coding agent (Claude) driving the implementation from
-`docs/requirements.md`, under instructions to work autonomously, write acceptance-criteria tests
-before the code they cover, commit in small conventional-commit steps, and keep a blunt running log.
+**The specification was the instrument of direction.** I wrote `docs/requirements.md` before any
+code: ten assumptions with the cost of each being wrong, seven invariants, twenty-four acceptance
+criteria, and an out-of-scope list with reasons. Every `AC-*` and `INV-*` in the test suite traces
+back to it. Writing it also corrected my own mental model. I had initially assumed the Service
+Advisor picks the technician and the bay; the brief's request payload carries neither, so the
+system must assign them. That turned a validate-and-insert problem into a resource allocation
+problem, and it is the reason `domain.AssignmentPolicy` exists.
 
-**What the AI did well.** It kept the layering honest (no SQL or HTTP types leak into the service,
-no rules in handlers or SQL), designed the database-first correctness model and the transaction
-protocol around it, produced the concurrency and idempotency tests that actually exercise the
-guarantees, and documented every decision the spec left open with the counter-argument attached.
+**Constraints I fixed before delegating.** Correctness lives in the database, as partial exclusion
+constraints on `tstzrange` scoped to `CONFIRMED`; an application check-then-insert is a
+read-modify-write race and was ruled out. Intervals are half-open. Assignment is deterministic and
+sits behind an interface. Layering is handler → service → repository with a pure domain, no ORM,
+no business logic in handlers or SQL. Tests are named after acceptance criteria so coverage of the
+specification is greppable.
 
-**Where it needed a human, or would have.** The specification is silent on slot granularity, error
-precedence, error body shape, and what a replayed rejection should return. The agent chose and recorded each answer
-(`docs/ai-collaboration-raw.md`); a reviewer should treat those as proposals. It also made one
-genuine mistake that tests did not catch: the OpenTelemetry resource construction crashed the
-service on start-up in Docker. Running the compose stack exposed it; a failing test was added and
-then the fix — the kind of thing that only shows up when you run the thing.
+**What I delegated.** The implementation of all seven phases (schema and seed, domain, persistence,
+HTTP, observability, documentation) to an AI coding agent, under the constraints above, with the
+instruction to commit tests before the code they cover and to keep a blunt running log —
+`docs/ai-collaboration-raw.md` — written *during* the work, per phase, so that every decision the
+spec did not dictate, every guess and every correction could be checked against the diff rather
+than reconstructed afterwards.
 
-**What to review first.** `docs/review-notes.md` lists seven places in priority order, starting
-with the three exclusion constraints and the booking transaction.
+**How I verified the result.**
 
-**Process observations.** "Tests first" was followed at the commit level, but tests and
-implementation were written minutes apart by the same author with the design already fixed, so the
-red→green signal is weaker than it looks; judge the tests on content. The commit count (~68) overshot
-the requested 25–40 because doc updates were committed per phase as instructed.
+<!-- TODO(human): what you ran, what you read, what you found -->
+- Ran: (compose from a clean volume, `make test`, lint, specific cURL flows, CI runs)
+- Read: (which files end to end; which tests were read for content, not just names)
+- Found: (what was wrong, what was changed as a result, what was accepted as-is)
+
+**What the agent decided that I did not.** The specification was silent on several points and the
+agent chose: a 30-minute availability grid; a flat error body `{code, message, conflicting?,
+details?}`; rejecting unknown JSON fields; `404` for a malformed appointment id; replaying stored
+rejections under an idempotency key; a bounded re-selection after losing a race; and the
+handler/service/repository ports. Two of its choices amended the specification. It added a
+`vehicleId` parameter to `GET /availability`, because without the vehicle availability can offer a
+slot that booking then refuses on INV-3; it started as optional and became required at review
+(requirements v1.1). It introduced `422 IDEMPOTENCY_KEY_REUSED` for a key replayed with a different
+body, a case the spec had not considered; it is now in §10.2. One defect no test caught: the
+OpenTelemetry resource construction crashed the service at start-up. It surfaced only when the
+compose stack was actually run; a failing test was added, then the fix.
+
+**Where manual review changed the design.** Drawn from the log and the git history:
+- Error precedence was vehicle-first (INV-3 before resource conflicts) until review. I changed it
+  so AC-18 holds literally — identical concurrent requests for the last slot all receive
+  `NO_AVAILABLE_RESOURCE` — accepting the less specific message when a car is double-booked *and*
+  the resources are gone (risk item 3).
+- `GET /availability` requires `vehicleId` by my decision, and I had the spec amended to v1.1
+  rather than leave code and spec disagreeing (risk item 5).
+- INV-4 and INV-5 were enforced only by the domain filter; I had them moved into the database as
+  composite foreign keys (migration 0002), accepting the RESTRICT cost recorded in ADR-0001 (risk
+  item 8).
+- Two independent review passes over the finished code found a retry budget that produced spurious
+  rejections with more than three free resources, and CI on slower hardware then exposed
+  exclusion-constraint deadlocks the local machine never produced; both led to the per-day advisory
+  lock and the resource-sized budget in ADR-0001.
+
+**Process observations.** "Tests first" was followed at the commit level, but the agent wrote tests
+and implementation minutes apart with the design already fixed, so the red→green signal is weaker
+than the history suggests; I judge the tests on content. The commit count overshot the 25–40 I
+asked for, because per-phase log updates and the test/implementation split were both things I
+asked for. Risk item 6 is a place where a SQL predicate — start within the local day, status
+`CONFIRMED` — encodes a business rule; that is a deliberate exception to the "no business logic in
+SQL" constraint I set at the outset, made to avoid loading every appointment ever written.
+
+The specification was the part that could not be delegated.
