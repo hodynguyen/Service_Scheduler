@@ -47,10 +47,12 @@ func (b *bookingTx) InsertAppointment(ctx context.Context, a service.NewAppointm
 	}
 	var id string
 	err = sp.QueryRow(ctx, `
-		INSERT INTO appointment (dealership_id, vehicle_id, customer_id, service_type_id, technician_id, bay_id, start_time, end_time, status)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'CONFIRMED')
+		INSERT INTO appointment (dealership_id, vehicle_id, customer_id, service_type_id, required_skill_id, required_bay_type,
+		                         technician_id, bay_id, start_time, end_time, status)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'CONFIRMED')
 		RETURNING id`,
-		a.DealershipID, a.VehicleID, a.CustomerID, a.ServiceTypeID, a.TechnicianID, a.BayID, a.Interval.Start, a.Interval.End,
+		a.DealershipID, a.VehicleID, a.CustomerID, a.ServiceTypeID, a.RequiredSkillID, string(a.RequiredBayType),
+		a.TechnicianID, a.BayID, a.Interval.Start, a.Interval.End,
 	).Scan(&id)
 	if err != nil {
 		_ = sp.Rollback(ctx)
@@ -85,6 +87,11 @@ func mapInsertError(err error) error {
 	if pgErr.Code == "40P01" {
 		return fmt.Errorf("%w: %w", service.ErrLostRace,
 			domain.NewError(domain.CodeNoAvailableResource, "concurrent booking contention (deadlock resolved by the database)"))
+	}
+	if pgErr.Code == "23503" {
+		// INV-4/INV-5/INV-7 foreign keys: an invariant the domain should have
+		// upheld. Loud failure (500) is correct; it means a bug, not contention.
+		return fmt.Errorf("insert appointment: database rejected an invariant violation (%s): %w", pgErr.ConstraintName, err)
 	}
 	if pgErr.Code != "23P01" {
 		return fmt.Errorf("insert appointment: %w", err)

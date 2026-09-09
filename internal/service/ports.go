@@ -60,9 +60,14 @@ type NewAppointment struct {
 	VehicleID     string
 	CustomerID    string
 	ServiceTypeID string
-	TechnicianID  string
-	BayID         string
-	Interval      domain.Interval
+	// RequiredSkillID and RequiredBayType are copied from the service type;
+	// the database pins them to it and checks the technician/bay against them
+	// (INV-4, INV-5).
+	RequiredSkillID string
+	RequiredBayType domain.BayType
+	TechnicianID    string
+	BayID           string
+	Interval        domain.Interval
 }
 
 // IdempotencyRecord is the stored outcome of a keyed booking request (FR-4).

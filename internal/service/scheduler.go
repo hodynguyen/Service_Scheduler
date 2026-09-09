@@ -192,11 +192,13 @@ func (s *Scheduler) Book(ctx context.Context, req BookRequest) (appt domain.Appo
 		VehicleID:    vehicle.ID,
 	}
 	newAppt := NewAppointment{
-		DealershipID:  req.DealershipID,
-		VehicleID:     vehicle.ID,
-		CustomerID:    customer.ID,
-		ServiceTypeID: st.ID,
-		Interval:      iv,
+		DealershipID:    req.DealershipID,
+		VehicleID:       vehicle.ID,
+		CustomerID:      customer.ID,
+		ServiceTypeID:   st.ID,
+		RequiredSkillID: st.RequiredSkillID,
+		RequiredBayType: st.RequiredBayType,
+		Interval:        iv,
 	}
 
 	var outcome error // a *domain.Error rejection that must still commit the transaction
