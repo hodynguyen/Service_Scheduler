@@ -170,5 +170,5 @@ with the three exclusion constraints and the booking transaction.
 
 **Process observations.** "Tests first" was followed at the commit level, but tests and
 implementation were written minutes apart by the same author with the design already fixed, so the
-red→green signal is weaker than it looks; judge the tests on content. The commit count (~62) overshot
+red→green signal is weaker than it looks; judge the tests on content. The commit count (~68) overshot
 the requested 25–40 because doc updates were committed per phase as instructed.
