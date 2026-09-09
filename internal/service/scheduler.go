@@ -68,8 +68,8 @@ func New(repo Repository, opts ...Option) *Scheduler {
 	return s
 }
 
-// AvailabilityQuery is the input of FR-1. VehicleID is optional; when set,
-// INV-3 is evaluated as well.
+// AvailabilityQuery is the input of FR-1. VehicleID is required so that INV-3
+// is part of the answer (AC-22: "any invariant").
 type AvailabilityQuery struct {
 	DealershipID  string
 	ServiceTypeID string
@@ -104,10 +104,11 @@ func (s *Scheduler) Availability(ctx context.Context, q AvailabilityQuery) (Avai
 	if err != nil {
 		return AvailabilityResult{}, err
 	}
-	if q.VehicleID != "" {
-		if _, _, err := s.repo.VehicleWithOwner(ctx, q.DealershipID, q.VehicleID); err != nil {
-			return AvailabilityResult{}, err
-		}
+	if q.VehicleID == "" {
+		return AvailabilityResult{}, domain.NewError(domain.CodeValidationError, "vehicleId is required: availability is evaluated for a specific vehicle (INV-3)")
+	}
+	if _, _, err := s.repo.VehicleWithOwner(ctx, q.DealershipID, q.VehicleID); err != nil {
+		return AvailabilityResult{}, err
 	}
 	result := AvailabilityResult{Date: date, ServiceType: st, Slots: []time.Time{}}
 	window, open := dealership.Hours.Window(date, dealership.Location)

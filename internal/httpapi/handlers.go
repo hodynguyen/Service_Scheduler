@@ -42,10 +42,7 @@ func (h *handlers) availability(w http.ResponseWriter, r *http.Request) {
 	case !dateRe.MatchString(date):
 		details["date"] = "must be YYYY-MM-DD"
 	}
-	vehicleID := q.Get("vehicleId")
-	if vehicleID != "" && !uuidRe.MatchString(vehicleID) {
-		details["vehicleId"] = "must be a UUID"
-	}
+	requireUUID(details, "vehicleId", q.Get("vehicleId"))
 	if len(details) > 0 {
 		writeValidationError(w, "invalid query parameters", details)
 		return
@@ -55,7 +52,7 @@ func (h *handlers) availability(w http.ResponseWriter, r *http.Request) {
 		DealershipID:  strings.ToLower(q.Get("dealershipId")),
 		ServiceTypeID: strings.ToLower(q.Get("serviceTypeId")),
 		Date:          date,
-		VehicleID:     strings.ToLower(vehicleID),
+		VehicleID:     strings.ToLower(q.Get("vehicleId")),
 	})
 	if err != nil {
 		writeDomainError(w, r, err)
