@@ -338,3 +338,17 @@ Written by the AI agent immediately after each phase. Unedited. Accuracy over to
 - **Third CI run: green.** lint 31 s, test (unit + integration with testcontainers) 1 m 11 s,
   docker build 42 s — https://github.com/hodynguyen/Service_Scheduler/actions/runs/34307569034.
   Final state: 68 commits on `origin/main`, working tree clean.
+
+## Post-review change — error precedence   (2026-09-09 ~11:30 +07:00)
+- The human reviewer asked for AC-18 to hold literally. `Assign` now checks resource availability
+  before the vehicle conflict; identical concurrent requests for the last bay/technician all get
+  `NO_AVAILABLE_RESOURCE`, and `VEHICLE_ALREADY_BOOKED` is returned only when resources are free.
+- Cost: when a car is double-booked *and* the resources are gone, the advisor sees "no bay/technician"
+  rather than "this car is already booked". I still think vehicle-first is the more useful message
+  in that corner, but the spec text wins and the reviewer decided.
+- Tests changed: the domain test asserting vehicle-first became `TestAssign_AC18_ResourceConflict…`;
+  the identical-request AC-18 test now asserts N−1 × NO_AVAILABLE_RESOURCE exactly; the E2E
+  idempotency test's last assertion (same payload, no key → re-evaluated) now expects
+  NO_AVAILABLE_RESOURCE because the only alignment rig/technician are taken. AC-07 tests unchanged.
+- My first attempt to edit the domain test silently did not apply (the line had been changed by the
+  earlier lint fix), so the "test" commit was initially incomplete; fixed with a fixup before push.

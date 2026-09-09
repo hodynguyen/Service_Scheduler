@@ -158,8 +158,7 @@ protocol around it, produced the concurrency and idempotency tests that actually
 guarantees, and documented every decision the spec left open with the counter-argument attached.
 
 **Where it needed a human, or would have.** The specification is silent on slot granularity, error
-precedence, error body shape, what a replayed rejection should return, and whether AC-18's
-"identical requests" share a vehicle. The agent chose and recorded each answer
+precedence, error body shape, and what a replayed rejection should return. The agent chose and recorded each answer
 (`docs/ai-collaboration-raw.md`); a reviewer should treat those as proposals. It also made one
 genuine mistake that tests did not catch: the OpenTelemetry resource construction crashed the
 service on start-up in Docker. Running the compose stack exposed it; a failing test was added and

@@ -31,8 +31,11 @@ so the two endpoints never disagree on whether a slot is bookable.
 * **One function for both endpoints.** `domain.Assign` returns the pair or a precise error
   (`VEHICLE_ALREADY_BOOKED`, or `NO_AVAILABLE_RESOURCE` with `conflicting` listing `BAY`,
   `TECHNICIAN` or both). `domain.AvailableSlots` calls `Assign` for each candidate start time.
-* **Precedence.** The vehicle check (INV-3) runs before resource selection, because "this car is
-  already booked then" is more actionable than "no bay".
+* **Precedence.** Resource availability is checked before the vehicle (INV-3). AC-18 states that N
+  *identical* concurrent requests for the last qualifying bay/technician yield N−1
+  `NO_AVAILABLE_RESOURCE`; identical requests share the vehicle, so the resource conflict must be
+  reported first. `VEHICLE_ALREADY_BOOKED` is therefore returned only when a qualified bay and
+  technician are free — which is also the case where it is the actionable message (AC-07).
 * **Data loading.** The repository returns all technicians (with skills) and bays of the
   dealership plus the day's confirmed intervals; SQL performs no qualification or overlap logic.
 
@@ -45,7 +48,7 @@ so the two endpoints never disagree on whether a slot is bookable.
 | Least loaded over a rolling window or week | More "fair" but the spec says "on that date"; easy to swap behind the interface |
 | Qualification via SQL joins | Fewer rows transferred, but moves a business rule into SQL contrary to §11 Maintainability; the domain function is unit-tested in isolation |
 | Policy returns a ranked list to try in order on conflict | Would avoid the re-selection round-trip; rejected as premature — re-running the whole selection on fresh data is simpler and equally correct |
-| Resource-first precedence over the vehicle check | Would make AC-18 with *literally* identical requests report `NO_AVAILABLE_RESOURCE`, but gives the less useful message when a vehicle is double-booked; documented trade-off |
+| Vehicle-first precedence (the original implementation) | More actionable when a car is double-booked *and* resources are gone, but contradicts the literal text of AC-18; reversed after review |
 
 ## Consequences
 

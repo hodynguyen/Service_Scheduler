@@ -88,7 +88,7 @@ sequenceDiagram
         S->>R: DaySchedule(dealership, local day, vehicle)
         R->>PG: technicians+skills, bays, CONFIRMED intervals of the day
         S->>D: Assign(schedule, serviceType, interval, LeastLoadedPolicy)
-        D-->>S: (technician, bay) or VEHICLE_ALREADY_BOOKED / NO_AVAILABLE_RESOURCE[conflicting]
+        D-->>S: (technician, bay) or NO_AVAILABLE_RESOURCE[conflicting] / VEHICLE_ALREADY_BOOKED
         S->>R: InsertAppointment (SAVEPOINT)
         R->>PG: INSERT … status='CONFIRMED'
         alt exclusion violation 23P01 (a concurrent booking won)
@@ -218,8 +218,7 @@ This system was designed and implemented with an AI coding agent (Claude) workin
 * **Where it needed judgement calls** the specification did not make — slot granularity (30 min),
   error precedence (vehicle before resources; past before hours), the flat error body, strict JSON
   (unknown fields rejected), 404 for malformed path ids, storing rejections under idempotency keys,
-  the retry-on-lost-race behaviour, and reading AC-18's "identical requests" as identical-except-
-  vehicle. Each is recorded, with the reasoning and the counter-argument, in
+  and the retry-on-lost-race behaviour. Each is recorded, with the reasoning and the counter-argument, in
   [`ai-collaboration-raw.md`](./ai-collaboration-raw.md) so a human can overturn it deliberately.
 * **Where it was wrong** — the OpenTelemetry resource construction crashed the service on start-up
   inside docker compose (schema-URL conflict). Unit tests had not covered that path; the running

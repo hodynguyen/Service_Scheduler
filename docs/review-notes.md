@@ -17,11 +17,10 @@ recorded in the final entry of `ai-collaboration-raw.md`.
    loser pick the same next candidate (one competitor retired per round). Domain rejections are
    captured and the transaction still commits so the idempotency record is written; a *transient*
    outcome (budget exhausted) is returned but **not** recorded. Confirm you agree with both.
-3. **Error precedence** — `internal/domain/assign.go` checks the vehicle (INV-3) before resource
-   availability; `internal/domain/hours.go` checks "in the past" before business hours. AC-18 with
-   literally identical requests therefore yields `VEHICLE_ALREADY_BOOKED` for the losers, not
-   `NO_AVAILABLE_RESOURCE`; see `TestBooking_AC18_ConcurrentIdenticalRequests…` and the Phase 4 log.
-   A grader reading AC-18 literally may object; flipping the order is a two-line change in `Assign`.
+3. **Error precedence** — `internal/domain/assign.go` checks resource availability before the
+   vehicle (INV-3), so AC-18 holds literally (identical requests → `NO_AVAILABLE_RESOURCE`) and
+   `VEHICLE_ALREADY_BOOKED` appears only when resources are free (AC-07). This was vehicle-first
+   until the human review; `internal/domain/hours.go` still checks "in the past" before hours.
 4. **Idempotency** — `internal/service/scheduler.go` (`replay`, fingerprint) and
    `booking_tx.go` (`LockIdempotencyKey`, `SaveIdempotencyRecord`). Advisory lock on
    `hashtext(dealership), hashtext(key)`; rejections are replayed; payload mismatch returns

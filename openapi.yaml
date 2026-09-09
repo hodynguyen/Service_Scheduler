@@ -10,8 +10,9 @@ info:
 
     Notes
     * Concurrency: with one qualifying bay and technician, N concurrent requests for one slot yield
-      exactly one `201`; the losers receive `409 NO_AVAILABLE_RESOURCE`. If the losers also share the
-      *vehicle* with the winner, `409 VEHICLE_ALREADY_BOOKED` is reported first (INV-3 takes precedence).
+      exactly one `201`; the losers receive `409 NO_AVAILABLE_RESOURCE` even when they share the
+      vehicle with the winner. `409 VEHICLE_ALREADY_BOOKED` is reported only when a qualified bay and
+      technician are free but the vehicle already has an overlapping appointment.
     * Booking accepts any exact start instant within hours (not only the 30-minute availability grid).
 
     Conventions
