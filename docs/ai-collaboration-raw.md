@@ -314,3 +314,14 @@ Written by the AI agent immediately after each phase. Unedited. Accuracy over to
   non-interactive access. The 63 commits exist locally on `main`; a human must run
   `gh auth login -h github.com` (or add an SSH key) and `git push origin main`. GitHub Actions has
   therefore still not run.
+- **First CI run (after the human authenticated and I pushed): lint passed, integration failed.**
+  `TestBooking_ConcurrentRequestsUseEveryFreeResourceWhenMoreThanThreeQualify` got
+  `ERROR: deadlock detected (SQLSTATE 40P01)` on the GitHub runner; it never happened locally in
+  dozens of runs on an Apple Silicon machine. Root cause: two transactions inserting conflicting
+  rows at the same instant each see the other's in-progress tuple during the exclusion-constraint
+  check and wait on each other; Postgres aborts one. I had only mapped 23P01. Fix: 40P01 is now a
+  lost race (retry on fresh data), and when the retry budget is exhausted the service re-runs the
+  selection once more to decide between a precise rejection and a transient one. This is exactly
+  the class of bug the brief's "N concurrent requests" NFR exists to find, and the reason the
+  integration suite runs on CI hardware and not only on a laptop. Pushed as a follow-up commit; the
+  second CI run's result is recorded below.
