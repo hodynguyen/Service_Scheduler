@@ -46,5 +46,6 @@ recorded in the final entry of `ai-collaboration-raw.md`.
    09:07 consumes both the 09:00 and 09:30 availability slots. Consistent with the spec, but decide
    whether non-zero seconds should be rejected.
 10. **Operational defaults** — `middleware.RealIP` trusts `X-Forwarded-For` from any peer (only
-    affects the `remote` log field); `/readyz` pings the database, `/healthz` does not; the CI
-    workflow has not been executed at the time of writing.
+    affects the `remote` log field); `/readyz` pings the database, `/healthz` does not. CI is green
+    on GitHub Actions (lint, unit + integration with testcontainers, image build) since the per-day
+    lock landed; the two earlier red runs and their causes are in the log.
