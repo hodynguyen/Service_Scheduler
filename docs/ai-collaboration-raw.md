@@ -2,6 +2,9 @@
 
 Written by the AI agent immediately after each phase. Unedited. Accuracy over tone.
 
+Note added later, outside the per-phase entries: the file this log calls `review-notes.md` was
+renamed to `risk-areas.md`. The entries below keep the original name, as written at the time.
+
 ## Phase 1 — Foundation   (2026-09-09 ~04:10 +07:00)
 - Decisions I made that the spec did not dictate:
   - Module path `github.com/hodynguyen/service-scheduler` (derived from the git remote).

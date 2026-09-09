@@ -222,9 +222,10 @@ from that specification. What the model contributed and where it was kept in che
   test-before-implementation ordering were also produced by the agent.
 * **Where it needed judgement calls** the specification did not make — slot granularity (30 min),
   a required `vehicleId` on availability (added after human review so INV-3 is always applied),
-  error precedence (the agent chose vehicle before resources; changed at review to resource before
-  vehicle so AC-18 holds literally — identical concurrent requests for the last slot all receive
-  `NO_AVAILABLE_RESOURCE`; past still precedes hours), the flat error body, strict JSON
+  error precedence (the agent originally checked the vehicle first; changed at review so resource
+  conflicts are reported ahead of the vehicle conflict and AC-18 holds literally — identical
+  concurrent requests for the last slot all receive `NO_AVAILABLE_RESOURCE`; past still precedes
+  hours), the flat error body, strict JSON
   (unknown fields rejected), 404 for malformed path ids, storing rejections under idempotency keys,
   and the retry-on-lost-race behaviour. Each is recorded, with the reasoning and the counter-argument, in
   [`ai-collaboration-raw.md`](./ai-collaboration-raw.md) so a human can overturn it deliberately.
