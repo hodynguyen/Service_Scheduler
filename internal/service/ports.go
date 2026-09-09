@@ -37,6 +37,11 @@ type BookingTx interface {
 	// LockIdempotencyKey serialises concurrent requests carrying the same key
 	// for the rest of the transaction.
 	LockIdempotencyKey(ctx context.Context, dealershipID, key string) error
+	// LockSchedulingDay serialises candidate selection for one dealership-day
+	// for the rest of the transaction, so competitors select on committed
+	// data instead of racing (and deadlocking) on the exclusion constraints.
+	// Correctness never depends on it — the constraints do that.
+	LockSchedulingDay(ctx context.Context, dealershipID string, day domain.Date) error
 	FindIdempotencyRecord(ctx context.Context, dealershipID, key string, now time.Time) (*IdempotencyRecord, error)
 	SaveIdempotencyRecord(ctx context.Context, rec IdempotencyRecord) error
 }

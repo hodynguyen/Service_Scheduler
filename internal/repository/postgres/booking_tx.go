@@ -113,6 +113,21 @@ func (b *bookingTx) LockIdempotencyKey(ctx context.Context, dealershipID, key st
 	return nil
 }
 
+// LockSchedulingDay takes a transaction-scoped advisory lock on (dealership,
+// local date). Bookings for the same day then run one at a time through
+// selection + insert, which turns N simultaneous inserts fighting over the
+// exclusion constraints (deadlock cycles resolved 1 s at a time by Postgres)
+// into N quick sequential decisions on committed data.
+func (b *bookingTx) LockSchedulingDay(ctx context.Context, dealershipID string, day domain.Date) error {
+	ctx, span := tracer.Start(ctx, "repository.LockSchedulingDay")
+	defer span.End()
+	_, err := b.tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))`, dealershipID, "day:"+day.String())
+	if err != nil {
+		return fmt.Errorf("lock scheduling day: %w", err)
+	}
+	return nil
+}
+
 func (b *bookingTx) FindIdempotencyRecord(ctx context.Context, dealershipID, key string, now time.Time) (*service.IdempotencyRecord, error) {
 	rec := &service.IdempotencyRecord{DealershipID: dealershipID, Key: key}
 	var (

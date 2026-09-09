@@ -83,7 +83,8 @@ sequenceDiagram
             S-->>H: replay (same appointment or same rejection; IDEMPOTENCY_KEY_REUSED if payload differs)
         end
     end
-    loop up to 3 attempts
+    S->>PG: pg_advisory_xact_lock(hash(dealership), hash(day))  — serialises same-day selection
+    loop until inserted or selection fails (budget = qualifying resources)
         S->>R: DaySchedule(dealership, local day, vehicle)
         R->>PG: technicians+skills, bays, CONFIRMED intervals of the day
         S->>D: Assign(schedule, serviceType, interval, LeastLoadedPolicy)
@@ -113,10 +114,13 @@ Key properties of this flow:
 * **Atomicity** — one transaction covers selection, insert and idempotency record. Either a
   CONFIRMED row that satisfies every invariant exists, or nothing is written except (optionally)
   the record of the rejection.
-* **Concurrency** — application checks never guard correctness. Two transactions inserting
-  overlapping rows for the same bay/technician/vehicle serialise on the exclusion constraint; the
-  loser gets `23P01` after the winner commits, re-reads (READ COMMITTED sees the new row) and either
-  finds a spare resource or produces the precise rejection. AC-18 is tested with 20 goroutines.
+* **Concurrency** — application checks never guard correctness. Overlapping rows for the same
+  bay/technician/vehicle are impossible because of the exclusion constraints. Selection for one
+  dealership-day is additionally serialised by a transaction advisory lock so competitors decide one
+  after another on committed data instead of deadlocking on the constraint check (`40P01`, observed
+  on CI) and re-picking the same resource; if a race is still lost (`23P01`/`40P01`) the service
+  re-selects on fresh data. AC-18 is tested with 20 goroutines; a four-bay variant proves no
+  spurious rejection.
 * **Determinism** — BR-6 is a pure function of the day's schedule; identical inputs give identical
   assignments (AC-21), which is also why the lost-race retry is needed (all competitors pick the
   same "best" resource first).
@@ -193,9 +197,9 @@ traces (contention on a single resource).
 ## 6. Scaling and operations
 
 The service is stateless; any number of replicas can run against one database because the
-invariants live in the database. Under contention on a single resource, concurrent inserts
-serialise on the exclusion constraint; that is the intended bottleneck (one bay can only be booked
-once). Availability queries are read-only and served by the partial index
+invariants live in the database. Bookings for the same dealership-day are serialised by an advisory
+lock (milliseconds each); other days and dealerships proceed in parallel. That is the intended
+bottleneck: a workshop day is booked one decision at a time. Availability queries are read-only and served by the partial index
 `appointment_dealership_day_idx (dealership_id, start_time) WHERE status='CONFIRMED'`.
 
 Not implemented (out of scope per §5.2 or deferred): expired idempotency-key purge, cancellation

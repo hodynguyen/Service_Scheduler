@@ -214,6 +214,11 @@ func (s *Scheduler) Book(ctx context.Context, req BookRequest) (appt domain.Appo
 			}
 		}
 
+		// Serialise selection per dealership-day (after the key lock, so lock
+		// order is always key -> day and cannot cycle).
+		if err := tx.LockSchedulingDay(ctx, req.DealershipID, domain.DateOf(iv.Start, dealership.Location)); err != nil {
+			return err
+		}
 		var transient bool
 		appt, outcome, transient = s.assignAndInsert(ctx, tx, query, st, newAppt)
 		if outcome != nil {
@@ -273,13 +278,14 @@ func (s *Scheduler) replay(ctx context.Context, tx BookingTx, rec *IdempotencyRe
 }
 
 // assignAndInsert selects resources on fresh data and lets the database
-// adjudicate. Losing a race to a concurrent booking is not a rejection by
-// itself: the selection is repeated so spare resources are used. Because the
-// policy is deterministic every loser re-selects the same next candidate and
-// each round retires at most one competitor, so the budget is the number of
-// qualifying resources (a competitor consumes one technician and one bay per
-// round), never less than maxAttempts. When no candidate remains, Assign
-// produces the precise NO_AVAILABLE_RESOURCE / VEHICLE_ALREADY_BOOKED answer.
+// adjudicate. With the per-day lock held, same-day competitors are already
+// serialised and the first attempt normally succeeds or yields the precise
+// rejection. The retry remains as defence in depth for writers that do not
+// take the lock (there are none today) and for cross-day vehicle conflicts:
+// losing a race is not a rejection by itself, selection is repeated on fresh
+// data. Because the policy is deterministic every loser re-selects the same
+// next candidate and each round retires at most one competitor, so the budget
+// is the number of qualifying resources, never less than maxAttempts.
 //
 // transient is true only when the budget ran out while resources may still
 // be free (sustained contention beyond the qualified count, which needs a

@@ -33,6 +33,15 @@ CONSTRAINT appointment_no_bay_overlap
   to a savepoint, reloads the day's schedule (READ COMMITTED sees the competitor's row) and either
   picks a spare resource or returns the domain's precise rejection. Attempts are bounded (3).
 * INV-7 is enforced the same way in spirit: composite foreign keys `(resource_id, dealership_id)`.
+* **Selection is serialised per dealership-day** with `pg_advisory_xact_lock(hashtext(dealership),
+  hashtext('day:'+date))`, taken inside the booking transaction after the idempotency lock (fixed
+  order key → day, so the two locks cannot cycle). This is *not* part of the guarantee: it exists
+  because N simultaneous conflicting inserts each see the others' in-progress tuples during the
+  exclusion check and form wait cycles that Postgres breaks one victim per `deadlock_timeout`
+  (1 s), and because the deterministic policy makes every loser re-pick the same resource while
+  the winner is still uncommitted. Observed on a 2-vCPU CI runner (84 s for four bookings). With
+  the lock, same-day bookings select one after another on committed data: no deadlocks, no
+  spurious rejections, the constraint still catches any writer that bypasses the lock.
 
 ## Alternatives considered
 
@@ -40,7 +49,7 @@ CONSTRAINT appointment_no_bay_overlap
 |---|---|
 | Application check + insert, no constraint | Race; violates §8 note explicitly |
 | `SELECT … FOR UPDATE` on bay/technician rows | Serialises all bookings for a resource for the whole transaction, including non-overlapping ones; still needs correct overlap logic in code; does not cover the vehicle without another lock |
-| Advisory lock per (resource, day) | Same throughput cost; correctness depends on every writer honouring the lock protocol |
+| Advisory lock as the *guarantee* (per resource or per day, without constraints) | Correctness would depend on every writer honouring the lock protocol; a per-day advisory lock is used here only to order selection, with the constraints still enforcing the invariant |
 | `SERIALIZABLE` isolation | Correct but yields serialization failures for unrelated rows sharing pages; retry logic is more complex than reacting to a named constraint |
 | Unique index on discretised slots (resource, slot_start) | Only works for fixed-length jobs aligned to the grid; service types have different durations |
 | Trigger with an overlap query | Reimplements what the exclusion constraint does declaratively, with the same locking needs and more surface for bugs |
@@ -48,8 +57,9 @@ CONSTRAINT appointment_no_bay_overlap
 ## Consequences
 
 * Correctness no longer depends on application memory or on there being a single replica.
-* Rejections from the constraint arrive after the winner commits, so losers wait briefly on the
-  lock held by the winner. This is the only serialisation point and it is per-resource.
+* Same-dealership, same-day bookings are serialised by the advisory lock (a few milliseconds of
+  selection + insert each); different days and dealerships proceed in parallel. The constraint
+  remains the only thing that makes overlapping rows impossible.
 * Because BR-6 is deterministic, concurrent requests tend to pick the same first candidate; the
   bounded retry exists so a lost race does not become a spurious rejection while other resources
   are free (tested).

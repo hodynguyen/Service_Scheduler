@@ -8,9 +8,11 @@ recorded in the final entry of `ai-collaboration-raw.md`.
    The correctness guarantee for INV-1..INV-3. Check `btree_gist`, `tstzrange(start_time, end_time, '[)')`,
    `WHERE (status = 'CONFIRMED')`, one constraint each for bay / technician / vehicle. Tests:
    `TestSchema_INV1..3_*` insert raw SQL and expect SQLSTATE 23P01 with the right constraint name.
-2. **Booking transaction and retry budget** — `internal/service/scheduler.go` (`Book`,
-   `assignAndInsert`) and `internal/repository/postgres/booking_tx.go` (`InsertAppointment`,
-   `mapInsertError`). Savepoint + retry on `ErrLostRace`. The budget is
+2. **Booking transaction, per-day advisory lock and retry budget** — `internal/service/scheduler.go`
+   (`Book`, `assignAndInsert`) and `internal/repository/postgres/booking_tx.go` (`LockSchedulingDay`,
+   `InsertAppointment`, `mapInsertError`). Lock order is idempotency key → day; the day lock only
+   orders selection (CI showed exclusion-check deadlock cycles without it), the constraints remain
+   the guarantee. Savepoint + retry on `ErrLostRace` (23P01 and 40P01). The budget is
    `max(3, min(qualified technicians, qualified bays)+1)` because the deterministic policy makes every
    loser pick the same next candidate (one competitor retired per round). Domain rejections are
    captured and the transaction still commits so the idempotency record is written; a *transient*
