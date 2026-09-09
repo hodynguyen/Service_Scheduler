@@ -1,8 +1,14 @@
 # Unified Service Scheduler — Requirements Specification
 
 **Scenario A — Keyloop Technical Assessment**
-**Version:** 1.1 — `vehicleId` added to FR-1 / §10.1 so availability can honour INV-3 (AC-22)
+**Version:** 1.1
 **Status:** Baseline for implementation
+
+**Changelog**
+- 1.1 — `vehicleId` added to FR-1 / §10.1 so availability can honour INV-3 (AC-22); §10.1 gains its
+  own error table; `422 IDEMPOTENCY_KEY_REUSED` added to §10.2 (a key replayed with a different
+  payload, a case 1.0 did not address); A-7 clarified: start times are exact instants, not grid-aligned.
+- 1.0 — baseline.
 **Implemented layer:** Backend (RESTful API + persistent database). The client layer is stubbed via an OpenAPI contract and cURL examples.
 
 ---
@@ -175,7 +181,7 @@ Resolutions of ambiguity in the original brief. Each states what was assumed, wh
 | **A-4** | Which technician is chosen when several qualify? | Least-loaded that day, ties by identifier | Deterministic (therefore testable) while modelling a real objective — load balancing | Policy sits behind an interface and is replaceable |
 | **A-5** | Is there a buffer between jobs? | None in v1; intervals are half-open `[start, end)` | Simplest correct model; adjacent bookings genuinely do not conflict | Widen the stored interval; the constraint is unchanged |
 | **A-6** | Where does the customer come from? | Derived from the vehicle's owner | R1 supplies a vehicle but R3 requires a customer; deriving prevents contradictory state | Accept and validate an explicit customer reference |
-| **A-7** | Is the desired time exact or approximate? | Exact. Unavailable means rejection, not a nearest-match suggestion | The brief checks availability *before confirming*, implying a specific requested time | `FR-1` already gives the client the bookable set to choose from |
+| **A-7** | Is the desired time exact or approximate? | Exact, to the second. Any instant within business hours may be requested; the 30-minute availability grid (FR-1) is a presentation convenience, not a booking constraint. A booking at 09:07 occupies `[09:07, 09:07+duration)` and therefore removes both the 09:00 and 09:30 slots from availability. Unavailable means rejection, not a nearest-match suggestion | The brief checks availability *before confirming*, implying a specific requested time; rejecting off-grid starts would make FR-2 depend on a granularity the brief never fixed | `FR-1` already gives the client the bookable set to choose from; if grid alignment is wanted, reject non-zero seconds / off-grid minutes with `VALIDATION_ERROR` in the handler |
 | **A-8** | Do technicians have individual shifts? | No — they inherit dealership business hours | Avoids tripling reference data for one additional filter | Add a `technician_availability` table to the candidate query |
 | **A-9** | How are timezones handled? | Instants stored in UTC; each dealership carries an IANA timezone; the API uses offset-aware ISO-8601 | Business hours are local concepts; instants are absolute | N/A — this is the correct model |
 | **A-10** | Is a service advisor recorded? | No — out of scope with authentication | Cannot attribute a booking without authenticated identity | Add `Appointment.createdBy` |
@@ -185,6 +191,11 @@ Resolutions of ambiguity in the original brief. Each states what was assumed, wh
 ## 10. API contract
 
 Base path: `/api/v1`. All timestamps are ISO-8601 with an explicit offset.
+
+Every error body has the shape `{ "code": "...", "message": "...", "conflicting": [...]?, "details": {...}? }`.
+Besides the per-endpoint codes below, the server returns transport-level codes that are not part of
+the domain contract: `404 NOT_FOUND` (unknown route), `405 METHOD_NOT_ALLOWED`, `504 TIMEOUT` and
+`500 INTERNAL_ERROR` (no internal detail is ever returned).
 
 ### 10.1 `GET /availability`
 
@@ -246,8 +257,9 @@ An empty `availableSlots` array is a valid 200 response, not an error.
 | 422 | `OUTSIDE_BUSINESS_HOURS` | Start time falls outside opening hours (BR-4) |
 | 422 | `SERVICE_EXCEEDS_CLOSING_TIME` | Start is valid but the job would finish after closing (BR-4) |
 | 422 | `START_TIME_IN_PAST` | BR-5 |
+| 422 | `IDEMPOTENCY_KEY_REUSED` | The `Idempotency-Key` was already used with a different request body (FR-4) |
 | 404 | `RESOURCE_NOT_FOUND` | Unknown dealership, vehicle or service type |
-| 400 | `VALIDATION_ERROR` | Malformed payload |
+| 400 | `VALIDATION_ERROR` | Malformed payload, including unknown fields (BR-8) |
 
 Distinguishing *no bay* from *no technician* is deliberate: it lets an advisor tell a customer something more useful than "unavailable".
 
