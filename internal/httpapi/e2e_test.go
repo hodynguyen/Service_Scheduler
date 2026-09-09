@@ -109,7 +109,7 @@ func TestE2E_AC19_IdempotencyKeyHeaderReplaysThe201(t *testing.T) {
 
 func TestE2E_AC22_AvailabilityReflectsBookings(t *testing.T) {
 	h := newRealServer(t)
-	url := "/api/v1/availability?dealershipId=" + postgres.SeedDealershipID + "&serviceTypeId=" + postgres.SeedServiceTypeAlignmentID + "&date=2030-03-04"
+	url := "/api/v1/availability?dealershipId=" + postgres.SeedDealershipID + "&serviceTypeId=" + postgres.SeedServiceTypeAlignmentID + "&date=2030-03-04&vehicleId=" + postgres.SeedVehicleVF8ID
 	rec, before := do(t, h, http.MethodGet, url, "")
 	if rec.Code != http.StatusOK || len(before["availableSlots"].([]any)) != 17 {
 		t.Fatalf("before: %d %s", rec.Code, rec.Body.String())

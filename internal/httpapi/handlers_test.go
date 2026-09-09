@@ -280,7 +280,7 @@ func TestHTTP_AC24_AvailabilityRendersSpecBodyAndEmptyArray(t *testing.T) {
 			Slots:       []time.Time{},
 		}, nil
 	}}
-	rec, body := do(t, newServer(f), http.MethodGet, "/api/v1/availability?dealershipId="+dealershipID+"&serviceTypeId="+serviceTypeID+"&date=2030-03-04", "")
+	rec, body := do(t, newServer(f), http.MethodGet, "/api/v1/availability?dealershipId="+dealershipID+"&serviceTypeId="+serviceTypeID+"&date=2030-03-04&vehicleId="+vehicleID, "")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body %s", rec.Code, rec.Body.String())
 	}
@@ -294,7 +294,7 @@ func TestHTTP_AC24_AvailabilityRendersSpecBodyAndEmptyArray(t *testing.T) {
 	if !strings.Contains(rec.Body.String(), `"availableSlots":[]`) {
 		t.Errorf("empty slots must serialise as [] not null: %s", rec.Body.String())
 	}
-	if f.lastAvailability.DealershipID != dealershipID || f.lastAvailability.ServiceTypeID != serviceTypeID || f.lastAvailability.Date != "2030-03-04" || f.lastAvailability.VehicleID != "" {
+	if f.lastAvailability.DealershipID != dealershipID || f.lastAvailability.ServiceTypeID != serviceTypeID || f.lastAvailability.Date != "2030-03-04" || f.lastAvailability.VehicleID != vehicleID {
 		t.Fatalf("service received %+v", f.lastAvailability)
 	}
 }
@@ -316,7 +316,7 @@ func TestHTTP_AvailabilitySlotsCarryDealershipOffset(t *testing.T) {
 		t.Fatalf("availableSlots = %v", slots)
 	}
 	if f.lastAvailability.VehicleID != vehicleID {
-		t.Fatalf("optional vehicleId must be forwarded, got %q", f.lastAvailability.VehicleID)
+		t.Fatalf("vehicleId must be forwarded, got %q", f.lastAvailability.VehicleID)
 	}
 }
 
@@ -327,11 +327,12 @@ func TestHTTP_AvailabilityQueryValidation(t *testing.T) {
 	}}
 	h := newServer(f)
 	for name, q := range map[string]string{
-		"missing dealershipId":  "serviceTypeId=" + serviceTypeID + "&date=2030-03-04",
-		"missing serviceTypeId": "dealershipId=" + dealershipID + "&date=2030-03-04",
-		"missing date":          "dealershipId=" + dealershipID + "&serviceTypeId=" + serviceTypeID,
-		"bad date":              "dealershipId=" + dealershipID + "&serviceTypeId=" + serviceTypeID + "&date=04-03-2030",
-		"bad uuid":              "dealershipId=nope&serviceTypeId=" + serviceTypeID + "&date=2030-03-04",
+		"missing dealershipId":  "serviceTypeId=" + serviceTypeID + "&date=2030-03-04&vehicleId=" + vehicleID,
+		"missing serviceTypeId": "dealershipId=" + dealershipID + "&date=2030-03-04&vehicleId=" + vehicleID,
+		"missing date":          "dealershipId=" + dealershipID + "&serviceTypeId=" + serviceTypeID + "&vehicleId=" + vehicleID,
+		"missing vehicleId":     "dealershipId=" + dealershipID + "&serviceTypeId=" + serviceTypeID + "&date=2030-03-04",
+		"bad date":              "dealershipId=" + dealershipID + "&serviceTypeId=" + serviceTypeID + "&date=04-03-2030&vehicleId=" + vehicleID,
+		"bad uuid":              "dealershipId=nope&serviceTypeId=" + serviceTypeID + "&date=2030-03-04&vehicleId=" + vehicleID,
 		"bad vehicleId":         "dealershipId=" + dealershipID + "&serviceTypeId=" + serviceTypeID + "&date=2030-03-04&vehicleId=nope",
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -345,7 +346,7 @@ func TestHTTP_AvailabilityNotFoundIs404(t *testing.T) {
 	f := &fakeService{availability: func(service.AvailabilityQuery) (service.AvailabilityResult, error) {
 		return service.AvailabilityResult{}, domain.NotFound("dealership", dealershipID)
 	}}
-	rec, body := do(t, newServer(f), http.MethodGet, "/api/v1/availability?dealershipId="+dealershipID+"&serviceTypeId="+serviceTypeID+"&date=2030-03-04", "")
+	rec, body := do(t, newServer(f), http.MethodGet, "/api/v1/availability?dealershipId="+dealershipID+"&serviceTypeId="+serviceTypeID+"&date=2030-03-04&vehicleId="+vehicleID, "")
 	expectError(t, rec, body, http.StatusNotFound, "RESOURCE_NOT_FOUND")
 }
 

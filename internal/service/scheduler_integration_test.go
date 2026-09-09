@@ -618,7 +618,7 @@ func contains(xs []string, x string) bool {
 func TestAvailability_AC22_ExcludesSlotsThatWouldFailAnInvariant(t *testing.T) {
 	h := newHarness(t)
 	h.mustBook(t, postgres.SeedVehicleCamryID, postgres.SeedServiceTypeAlignmentID, local(monday, 10, 0)) // An + rig 10:00–11:00
-	slots := h.availability(t, postgres.SeedServiceTypeAlignmentID, "2030-03-04", "")
+	slots := h.availability(t, postgres.SeedServiceTypeAlignmentID, "2030-03-04", postgres.SeedVehicleVF8ID)
 	for _, s := range []string{"09:30", "10:00", "10:30"} {
 		if contains(slots, s) {
 			t.Fatalf("%s overlaps the 10:00 booking; slots = %v", s, slots)
@@ -629,16 +629,20 @@ func TestAvailability_AC22_ExcludesSlotsThatWouldFailAnInvariant(t *testing.T) {
 			t.Fatalf("%s must be available; slots = %v", s, slots)
 		}
 	}
-	// With the vehicle supplied, INV-3 is applied as well.
+	// For the booked vehicle itself, INV-3 removes its own busy slots even though resources exist.
 	withVehicle := h.availability(t, postgres.SeedServiceTypeOilChangeID, "2030-03-04", postgres.SeedVehicleCamryID)
 	if contains(withVehicle, "10:00") || contains(withVehicle, "10:30") {
 		t.Fatalf("vehicle is busy 10:00–11:00; slots = %v", withVehicle)
+	}
+	other := h.availability(t, postgres.SeedServiceTypeOilChangeID, "2030-03-04", postgres.SeedVehicleVF8ID)
+	if !contains(other, "10:00") || !contains(other, "10:30") {
+		t.Fatalf("another vehicle can still use the free GENERAL bays at 10:00; slots = %v", other)
 	}
 }
 
 func TestAvailability_AC23_ExcludesSlotsRunningPastClosing(t *testing.T) {
 	h := newHarness(t)
-	slots := h.availability(t, postgres.SeedServiceTypeEVDiagnosticID, "2030-03-09", "") // Saturday 08:00–12:00, 90 min
+	slots := h.availability(t, postgres.SeedServiceTypeEVDiagnosticID, "2030-03-09", postgres.SeedVehicleVF8ID) // Saturday 08:00–12:00, 90 min
 	want := []string{"08:00", "08:30", "09:00", "09:30", "10:00", "10:30"}
 	if fmt.Sprint(slots) != fmt.Sprint(want) {
 		t.Fatalf("slots = %v, want %v", slots, want)
@@ -649,7 +653,7 @@ func TestAvailability_AC24_FullyBookedDayReturnsEmptyArray(t *testing.T) {
 	h := newHarness(t)
 	h.mustBook(t, postgres.SeedVehicleVF8ID, postgres.SeedServiceTypeEVDiagnosticID, local(saturday, 8, 0))    // 08:00–09:30
 	h.mustBook(t, postgres.SeedVehicleCamryID, postgres.SeedServiceTypeEVDiagnosticID, local(saturday, 9, 30)) // 09:30–11:00
-	res, err := h.svc.Availability(h.ctx, service.AvailabilityQuery{DealershipID: postgres.SeedDealershipID, ServiceTypeID: postgres.SeedServiceTypeEVDiagnosticID, Date: "2030-03-09"})
+	res, err := h.svc.Availability(h.ctx, service.AvailabilityQuery{DealershipID: postgres.SeedDealershipID, ServiceTypeID: postgres.SeedServiceTypeEVDiagnosticID, Date: "2030-03-09", VehicleID: postgres.SeedVehicleCRVID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -663,7 +667,7 @@ func TestAvailability_AC24_FullyBookedDayReturnsEmptyArray(t *testing.T) {
 
 func TestAvailability_ClosedDayReturnsEmptyArrayNotError(t *testing.T) {
 	h := newHarness(t)
-	slots := h.availability(t, postgres.SeedServiceTypeOilChangeID, "2030-03-10", "")
+	slots := h.availability(t, postgres.SeedServiceTypeOilChangeID, "2030-03-10", postgres.SeedVehicleCamryID)
 	if len(slots) != 0 {
 		t.Fatalf("Sunday is closed; slots = %v", slots)
 	}
