@@ -38,18 +38,16 @@ func LoadMinutes(booked []Interval) int {
 }
 
 // Assign selects a technician and a bay for interval iv according to BR-2,
-// BR-3 and the policy (BR-6). It returns:
+// BR-3 and the policy (BR-6). It returns, in this order of precedence:
 //
-//   - VEHICLE_ALREADY_BOOKED when the vehicle overlaps an active appointment (INV-3, AC-07)
 //   - NO_AVAILABLE_RESOURCE listing which of BAY / TECHNICIAN has no free,
-//     qualified candidate (AC-04..AC-06, AC-08, AC-09)
+//     qualified candidate (AC-04..AC-06, AC-08, AC-09). Checked first so that
+//     N identical requests for the last slot all fail with this code (AC-18).
+//   - VEHICLE_ALREADY_BOOKED when resources are free but the vehicle overlaps
+//     an active appointment (INV-3, AC-07)
 //
 // This is advisory: the database constraints are the correctness guarantee.
 func Assign(s DaySchedule, st ServiceType, iv Interval, policy AssignmentPolicy) (Assignment, error) {
-	if OverlapsAny(iv, s.VehicleBooked) {
-		return Assignment{}, NewError(CodeVehicleAlreadyBooked, "vehicle already has an active appointment overlapping %s", iv)
-	}
-
 	techByID := map[string]Technician{}
 	var techCandidates []Candidate
 	for _, ts := range QualifiedTechnicians(s.Technicians, st.RequiredSkillID) {
@@ -77,6 +75,9 @@ func Assign(s DaySchedule, st ServiceType, iv Interval, policy AssignmentPolicy)
 			Message:     "no qualifying free resource for " + iv.String(),
 			Conflicting: conflicting,
 		}
+	}
+	if OverlapsAny(iv, s.VehicleBooked) {
+		return Assignment{}, NewError(CodeVehicleAlreadyBooked, "vehicle already has an active appointment overlapping %s", iv)
 	}
 
 	tech, okTech := policy.Choose(techCandidates)
