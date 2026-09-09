@@ -68,12 +68,25 @@ func (b *bookingTx) InsertAppointment(ctx context.Context, a service.NewAppointm
 	return appointment(ctx, b.tx, id)
 }
 
-// mapInsertError translates an exclusion violation into ErrLostRace wrapped
-// around the matching domain error. Which constraint fired tells us which
-// resource was taken by a concurrent transaction.
+// mapInsertError translates a database rejection caused by a concurrent
+// booking into ErrLostRace wrapped around a domain error.
+//
+//   - 23P01 exclusion_violation: the competitor committed first; the
+//     constraint name says which resource it took.
+//   - 40P01 deadlock_detected: two inserts conflicted at the same instant and
+//     each waited on the other's in-progress tuple during the exclusion check;
+//     Postgres aborted this one. Nothing is known about the winner yet, so the
+//     retry re-selects on fresh data.
 func mapInsertError(err error) error {
 	var pgErr *pgconn.PgError
-	if !errors.As(err, &pgErr) || pgErr.Code != "23P01" {
+	if !errors.As(err, &pgErr) {
+		return fmt.Errorf("insert appointment: %w", err)
+	}
+	if pgErr.Code == "40P01" {
+		return fmt.Errorf("%w: %w", service.ErrLostRace,
+			domain.NewError(domain.CodeNoAvailableResource, "concurrent booking contention (deadlock resolved by the database)"))
+	}
+	if pgErr.Code != "23P01" {
 		return fmt.Errorf("insert appointment: %w", err)
 	}
 	var de *domain.Error

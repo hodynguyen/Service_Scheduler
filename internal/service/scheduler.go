@@ -312,8 +312,22 @@ func (s *Scheduler) assignAndInsert(ctx context.Context, tx BookingTx, q Schedul
 			return domain.Appointment{}, err, false
 		}
 		lastRace = err
+		// A deadlock victim lost no candidate to a committed competitor yet;
+		// allow one extra attempt per such event, within a hard ceiling.
+		if de, ok := domain.AsError(err); ok && len(de.Conflicting) == 0 && de.Code == domain.CodeNoAvailableResource && budget < 2*s.maxAttempts+16 {
+			budget++
+		}
 	}
-	// Budget exhausted under sustained contention: report the database's last verdict.
+	// Budget exhausted. Decide from fresh data whether that is a durable fact
+	// (selection now fails: precise NO_AVAILABLE_RESOURCE / VEHICLE_ALREADY_BOOKED)
+	// or merely sustained contention (selection would still succeed: transient).
+	schedule, err := tx.DaySchedule(ctx, q)
+	if err != nil {
+		return domain.Appointment{}, err, false
+	}
+	if _, err := domain.Assign(schedule, st, na.Interval, s.policy); err != nil {
+		return domain.Appointment{}, err, false
+	}
 	if de, ok := domain.AsError(lastRace); ok {
 		return domain.Appointment{}, de, true
 	}
