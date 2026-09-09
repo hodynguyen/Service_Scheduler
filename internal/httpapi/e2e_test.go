@@ -101,9 +101,10 @@ func TestE2E_AC19_IdempotencyKeyHeaderReplaysThe201(t *testing.T) {
 	// Same key, different payload.
 	rec, errBody := do(t, h, http.MethodPost, "/api/v1/appointments", bookingBody(postgres.SeedVehicleCamryID, postgres.SeedServiceTypeAlignmentID, "2030-03-04T11:00:00+07:00"), "Idempotency-Key", key)
 	expectError(t, rec, errBody, http.StatusUnprocessableEntity, "IDEMPOTENCY_KEY_REUSED")
-	// Without the header the same payload is a genuine second attempt: the vehicle is now busy.
+	// Without the header the same payload is a genuine second attempt, re-evaluated (409), not replayed (201).
+	// The only alignment rig/technician are taken by the first booking, so NO_AVAILABLE_RESOURCE is reported.
 	rec, errBody = do(t, h, http.MethodPost, "/api/v1/appointments", body)
-	expectError(t, rec, errBody, http.StatusConflict, "VEHICLE_ALREADY_BOOKED")
+	expectError(t, rec, errBody, http.StatusConflict, "NO_AVAILABLE_RESOURCE")
 }
 
 func TestE2E_AC22_AvailabilityReflectsBookings(t *testing.T) {

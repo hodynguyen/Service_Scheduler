@@ -394,20 +394,22 @@ func TestBooking_AC18_ConcurrentIdenticalRequestsYieldExactlyOneSuccess(t *testi
 		}(i)
 	}
 	wg.Wait()
-	var ok int
+	var ok, rejected int
 	for _, err := range results {
-		if err == nil {
+		switch {
+		case err == nil:
 			ok++
-			continue
-		}
-		// Literally identical requests share the vehicle too, so INV-3 is the
-		// first invariant the losers hit and VEHICLE_ALREADY_BOOKED is reported.
-		if c := domain.CodeOf(err); c != domain.CodeVehicleAlreadyBooked && c != domain.CodeNoAvailableResource {
+		case domain.CodeOf(err) == domain.CodeNoAvailableResource:
+			// Literally identical requests share the vehicle too; AC-18 still
+			// requires NO_AVAILABLE_RESOURCE, so resource conflicts are reported
+			// ahead of the vehicle conflict.
+			rejected++
+		default:
 			t.Errorf("unexpected error: %v", err)
 		}
 	}
-	if ok != 1 || h.confirmedCount(t) != 1 {
-		t.Fatalf("successes = %d, confirmed rows = %d; want 1 and 1", ok, h.confirmedCount(t))
+	if ok != 1 || rejected != n-1 || h.confirmedCount(t) != 1 {
+		t.Fatalf("successes = %d, NO_AVAILABLE_RESOURCE = %d, confirmed rows = %d; want 1, %d, 1", ok, rejected, h.confirmedCount(t), n-1)
 	}
 	assertNoInvariantViolated(t, h.pool)
 }

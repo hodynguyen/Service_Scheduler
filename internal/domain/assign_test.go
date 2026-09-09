@@ -60,12 +60,16 @@ func TestAssign_AC07_VehicleWithOverlappingActiveAppointmentIsRejected(t *testin
 	_ = expectCode(t, err, CodeVehicleAlreadyBooked)
 }
 
-func TestAssign_AC07_VehicleCheckWinsOverResourceConflict(t *testing.T) {
+func TestAssign_AC18_ResourceConflictIsReportedBeforeVehicleConflict(t *testing.T) {
+	// AC-18 read literally: N identical requests (same vehicle) for the only
+	// qualifying bay/technician yield N-1 NO_AVAILABLE_RESOURCE. So when both
+	// the resources and the vehicle are busy, resources win.
 	busy := []Interval{iv(monday, 9, 0, 90*time.Minute)}
 	s := schedule(map[string][]Interval{techChi.ID: busy}, map[string][]Interval{bayEV.ID: busy})
 	s.VehicleBooked = busy
 	_, err := Assign(s, svcEV, iv(monday, 9, 0, 90*time.Minute), policy)
-	_ = expectCode(t, err, CodeVehicleAlreadyBooked)
+	de := expectCode(t, err, CodeNoAvailableResource)
+	expectConflicting(t, de, ResourceBay, ResourceTechnician)
 }
 
 func TestAssign_AC08_FreeButUnqualifiedTechnicianIsNotAssigned(t *testing.T) {
