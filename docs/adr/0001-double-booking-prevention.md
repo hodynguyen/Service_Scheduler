@@ -65,5 +65,9 @@ CONSTRAINT appointment_no_bay_overlap
   are free (tested).
 * Every insert path must go through the same table; there is no way to "forget" the check.
 * `btree_gist` must be available (it is in the standard `postgres:16` image).
-* INV-4/INV-5 (skill and bay-type match) are *not* covered by a constraint; they rely on the
-  candidate filter. A trigger could be added if that is judged necessary.
+* INV-4/INV-5 (skill and bay-type match) are covered since migration 0002 by composite foreign
+  keys: `appointment.required_skill_id / required_bay_type` are pinned to the service type and
+  the technician/bay must match them (`technician_skill(technician_id, skill_id)`,
+  `service_bay(id, bay_type)`). Trade-off: a service type's requirement, a technician's
+  certification or a bay's type cannot be changed while appointments reference it (RESTRICT);
+  historical rows need a data migration first.

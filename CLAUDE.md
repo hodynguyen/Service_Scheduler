@@ -13,7 +13,8 @@ are referenced from tests, commits and docs.
 - INV-1..INV-3 (no overlapping CONFIRMED appointments per bay / technician / vehicle) are
   enforced by PostgreSQL **exclusion constraints on `tstzrange(start_time, end_time, '[)')`**,
   partial on `status = 'CONFIRMED'`, using `btree_gist`. Application-level checks exist only to
-  produce good error messages — never as the correctness guarantee.
+  produce good error messages — never as the correctness guarantee. INV-4/INV-5 are additionally
+  enforced by composite foreign keys (migration 0002); INV-7 by composite FKs on dealership id.
 - Time is stored as `timestamptz` (UTC instants). Intervals are half-open `[start, end)`.
   Business hours are evaluated in the dealership's IANA timezone.
 - The assignment policy (BR-6: least-loaded that day, ties by ascending id) is deterministic and

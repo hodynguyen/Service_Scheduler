@@ -47,7 +47,7 @@ flowchart LR
 | `internal/domain` | Pure rules: half-open intervals, business-hour windows, qualification (BR-2/3), least-loaded policy (BR-6), assignment, availability slots. No I/O | Know about the database or HTTP |
 | `internal/repository/postgres` | Data access only: load one dealership's resources and the day's CONFIRMED intervals, insert inside a savepoint, translate constraint violations, idempotency rows, embedded migrations and seed | Decide which candidate wins |
 | `internal/observability` | JSON logs with correlation/trace ids, Prometheus instruments, OTel provider and middleware | — |
-| PostgreSQL | **The correctness guarantee** for INV-1..INV-3 (exclusion constraints) and INV-7 (composite foreign keys) | — |
+| PostgreSQL | **The correctness guarantee** for INV-1..INV-3 (exclusion constraints), INV-4/INV-5 and INV-7 (composite foreign keys) | — |
 
 The dependency direction is strictly inward: `httpapi → service → domain`, `postgres → service (ports) → domain`.
 Ports (`service.Repository`, `service.BookingTx`, `httpapi.Service`, `service.Instrumentation`) are declared
@@ -160,8 +160,10 @@ erDiagram
 * `business_hours(weekday 0=Sunday…6, opens_at time, closes_at time)`; no row = closed.
 * `idempotency_key(dealership_id, key)` PK; stores the *outcome* (appointment id or error code +
   conflicting), `expires_at = created + 24 h`.
-* INV-4/INV-5 (skill and bay type match) are enforced by the domain candidate filter, not by the
-  database — see review notes.
+* INV-4/INV-5 (skill and bay type match) are enforced by the domain candidate filter *and*, since
+  migration 0002, by composite foreign keys: `appointment.required_skill_id / required_bay_type`
+  are pinned to the service type, and `(technician_id, required_skill_id) → technician_skill`,
+  `(bay_id, required_bay_type) → service_bay(id, bay_type)` reject unqualified assignments.
 
 ## 4. Technology choices
 

@@ -37,11 +37,15 @@ recorded in the final entry of `ai-collaboration-raw.md`.
    `Date.Bounds`). Built with `time.Date(...)` in the dealership zone. The seeded zone has no DST;
    DST days are untested. Zones whose DST starts at 00:00 (America/Santiago) shift `Bounds.Start` to
    01:00 — only matters if opening hours start at midnight.
-8. **INV-4 / INV-5 / INV-6 are not database-enforced.** Only `domain.Assign` and
-   `ValidateBookingTime` guarantee skill/bay-type match and business hours. §11 "Scalability" says
-   correctness is enforced in the database; that is true only for INV-1..3 and INV-7. The reviewer
-   suggested composite FKs `(bay_id, bay_type)` / `(technician_id, skill_id)` via denormalised columns
-   on `appointment` — a schema change I did not make.
+8. **INV-4 / INV-5 now database-enforced; INV-6 is not.** Migration
+   `0002_enforce_skill_and_bay_type.sql` adds `required_skill_id` / `required_bay_type` on
+   `appointment` and four composite FKs (see ADR-0001). Check: the service copies the two values
+   from the loaded service type (`scheduler.go`, `newAppt`); the FKs make lying impossible
+   (`TestSchema_INV4_INV5_DenormalisedRequirementsMustMatchTheServiceType`). Operational cost:
+   changing a service type's requirement, decertifying a technician or retyping a bay is blocked
+   while appointments reference the old value — decide whether that RESTRICT behaviour is wanted.
+   INV-6 (business hours) remains domain-only; a DB check would need the hours table joined by
+   weekday and timezone, which is more than a constraint can express cleanly.
 9. **Exact start times vs the 30-minute grid** — booking accepts any exact instant (A-7); a booking at
    09:07 consumes both the 09:00 and 09:30 availability slots. Consistent with the spec, but decide
    whether non-zero seconds should be rejected.

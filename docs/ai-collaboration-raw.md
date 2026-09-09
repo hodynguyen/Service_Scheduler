@@ -364,3 +364,20 @@ Written by the AI agent immediately after each phase. Unedited. Accuracy over to
   Spec, OpenAPI and code agree again.
 - Tests: every availability test supplies a vehicle; AC-22 also asserts that a *different* vehicle
   still sees the slots the busy vehicle loses, so the filter is per vehicle, not global.
+
+## Post-review change — INV-4/INV-5 in the database   (2026-09-09 ~12:40 +07:00)
+- Human decision on review-notes item 8, implemented as the code reviewer proposed: two denormalised
+  columns on `appointment` (`required_skill_id`, `required_bay_type`), pinned to `service_type` by
+  composite FKs so a writer cannot lie, plus FKs to `technician_skill` and `service_bay(id, bay_type)`.
+  No trigger, no logic in SQL; the service copies the two values from the loaded service type.
+- Done as migration `0002` (not by editing 0001) with a backfill, so an existing database upgrades in
+  place; verified by starting the compose stack on the volume that already had 0001 applied.
+- Trade-off I want a human to be aware of: RESTRICT semantics. You cannot change a service type's
+  required skill/bay type, remove a technician's certification, or retype a bay while any appointment
+  (even CANCELLED) references the old value. For a real system I would add `ON UPDATE CASCADE` on
+  the service-type pins and accept that decertification requires migrating history — not done here.
+- INV-6 stays domain-only; it needs a join on business hours by weekday in the dealership zone.
+- 23503 from the insert is now wrapped as "database rejected an invariant violation" and surfaces as
+  500: if it ever fires, the domain filter has a bug and silence would be worse.
+- Tests: three schema tests written first (unqualified technician, wrong-type bay, lying about the
+  requirement) — red before the migration, green after. Full suite and lint green.
