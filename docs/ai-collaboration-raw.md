@@ -325,3 +325,13 @@ Written by the AI agent immediately after each phase. Unedited. Accuracy over to
   the class of bug the brief's "N concurrent requests" NFR exists to find, and the reason the
   integration suite runs on CI hardware and not only on a laptop. Pushed as a follow-up commit; the
   second CI run's result is recorded below.
+- **Second CI run: still failed, worse.** The same test took 84 s and returned my new "transient"
+  rejection: on the runner the four inserts kept deadlocking in cycles (Postgres resolves one victim
+  per 1 s `deadlock_timeout`) because every loser immediately re-picked the same bay/technician
+  while the winner was uncommitted. My first fix (map 40P01, retry) treated the symptom. Real fix:
+  serialise selection per dealership-day with a transaction advisory lock taken after the
+  idempotency lock. This *is* the "advisory lock" alternative ADR-0001 had rejected — the
+  distinction, now written into the ADR, is that the lock orders selection while the constraints
+  still guarantee the invariant. I was wrong to reject it outright; the constraint-only design is
+  correct but pathological under simultaneous conflicting inserts, and I only learned that from CI
+  hardware slower than my laptop. Under `GOMAXPROCS=2` locally: concurrency suite 50 s → 5 s.
