@@ -75,15 +75,72 @@ func TestSchema_INV1to3_ExclusionConstraintsArePartialOnConfirmed(t *testing.T) 
 	}
 }
 
+// insertAppointment writes an oil change (GENERAL_SERVICE skill, GENERAL bay).
 func insertAppointment(t *testing.T, vehicle, tech, bay string, start, end time.Time, status string) (string, error) {
+	t.Helper()
+	return insertAppointmentFor(t, vehicle, tech, bay, SeedServiceTypeOilChangeID, SeedSkillGeneralServiceID, "GENERAL", start, end, status)
+}
+
+// insertAppointmentFor writes a row with explicit denormalised requirement
+// columns so tests can also try to lie about them.
+func insertAppointmentFor(t *testing.T, vehicle, tech, bay, serviceType, requiredSkill, requiredBayType string, start, end time.Time, status string) (string, error) {
 	t.Helper()
 	var id string
 	err := pgtest.Pool(t).QueryRow(context.Background(), `
-		INSERT INTO appointment (dealership_id, vehicle_id, customer_id, service_type_id, technician_id, bay_id, start_time, end_time, status)
-		VALUES ($1, $2, (SELECT customer_id FROM vehicle WHERE id = $2), $3, $4, $5, $6, $7, $8)
+		INSERT INTO appointment (dealership_id, vehicle_id, customer_id, service_type_id, required_skill_id, required_bay_type,
+		                         technician_id, bay_id, start_time, end_time, status)
+		VALUES ($1, $2, (SELECT customer_id FROM vehicle WHERE id = $2), $3, $4, $5, $6, $7, $8, $9, $10)
 		RETURNING id`,
-		SeedDealershipID, vehicle, SeedServiceTypeOilChangeID, tech, bay, start, end, status).Scan(&id)
+		SeedDealershipID, vehicle, serviceType, requiredSkill, requiredBayType, tech, bay, start, end, status).Scan(&id)
 	return id, err
+}
+
+func foreignKeyViolation(t *testing.T, err error, constraint string) {
+	t.Helper()
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != "23503" {
+		t.Fatalf("expected foreign-key violation (23503) on %s, got %v", constraint, err)
+	}
+	if pgErr.ConstraintName != constraint {
+		t.Fatalf("constraint = %s, want %s", pgErr.ConstraintName, constraint)
+	}
+}
+
+func TestSchema_INV4_TechnicianWithoutRequiredSkillIsRejectedByDatabase(t *testing.T) {
+	requireDB(t)
+	// Dung holds GENERAL_SERVICE only; wheel alignment requires WHEEL_ALIGNMENT.
+	_, err := insertAppointmentFor(t, SeedVehicleCamryID, SeedTechnicianDungID, SeedBayAlignmentID,
+		SeedServiceTypeAlignmentID, SeedSkillWheelAlignmentID, "ALIGNMENT", t0900, t1000, "CONFIRMED")
+	foreignKeyViolation(t, err, ConstraintTechnicianHoldsSkill)
+	// Same row with An (who holds the skill) is accepted.
+	if _, err := insertAppointmentFor(t, SeedVehicleCamryID, SeedTechnicianAnID, SeedBayAlignmentID,
+		SeedServiceTypeAlignmentID, SeedSkillWheelAlignmentID, "ALIGNMENT", t0900, t1000, "CONFIRMED"); err != nil {
+		t.Fatalf("qualified technician must be accepted: %v", err)
+	}
+}
+
+func TestSchema_INV5_BayOfWrongTypeIsRejectedByDatabase(t *testing.T) {
+	requireDB(t)
+	// EV diagnostic requires an EV bay; Bay 1 is GENERAL.
+	_, err := insertAppointmentFor(t, SeedVehicleVF8ID, SeedTechnicianChiID, SeedBay1ID,
+		SeedServiceTypeEVDiagnosticID, SeedSkillEVHighVoltageID, "EV", t0900, t1030, "CONFIRMED")
+	foreignKeyViolation(t, err, ConstraintBayHasRequiredType)
+	if _, err := insertAppointmentFor(t, SeedVehicleVF8ID, SeedTechnicianChiID, SeedBayEVID,
+		SeedServiceTypeEVDiagnosticID, SeedSkillEVHighVoltageID, "EV", t0900, t1030, "CONFIRMED"); err != nil {
+		t.Fatalf("EV bay must be accepted: %v", err)
+	}
+}
+
+func TestSchema_INV4_INV5_DenormalisedRequirementsMustMatchTheServiceType(t *testing.T) {
+	requireDB(t)
+	// A writer cannot dodge INV-4 by claiming the alignment job only needs GENERAL_SERVICE …
+	_, err := insertAppointmentFor(t, SeedVehicleCamryID, SeedTechnicianDungID, SeedBayAlignmentID,
+		SeedServiceTypeAlignmentID, SeedSkillGeneralServiceID, "ALIGNMENT", t0900, t1000, "CONFIRMED")
+	foreignKeyViolation(t, err, ConstraintRequiredSkillMatchesServiceType)
+	// … nor INV-5 by claiming it needs a GENERAL bay.
+	_, err = insertAppointmentFor(t, SeedVehicleCamryID, SeedTechnicianAnID, SeedBay1ID,
+		SeedServiceTypeAlignmentID, SeedSkillWheelAlignmentID, "GENERAL", t0900, t1000, "CONFIRMED")
+	foreignKeyViolation(t, err, ConstraintRequiredBayTypeMatchesServiceType)
 }
 
 func exclusionViolation(t *testing.T, err error, constraint string) {
