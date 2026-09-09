@@ -1,7 +1,7 @@
 # Unified Service Scheduler — Requirements Specification
 
 **Scenario A — Keyloop Technical Assessment**
-**Version:** 1.0
+**Version:** 1.1 — `vehicleId` added to FR-1 / §10.1 so availability can honour INV-3 (AC-22)
 **Status:** Baseline for implementation
 **Implemented layer:** Backend (RESTful API + persistent database). The client layer is stubbed via an OpenAPI contract and cURL examples.
 
@@ -93,10 +93,10 @@ Each requirement traces back to the original brief (R1–R3).
 
 ### FR-1 — Query availability *(supports R2)*
 
-Given a dealership, a service type and a date, the system returns the set of start times at which the appointment could be booked.
+Given a dealership, a service type, a vehicle and a date, the system returns the set of start times at which the appointment could be booked for that vehicle.
 
 - Slots are generated at a fixed granularity (§9, A-7) within the dealership's business hours for that day.
-- A slot is returned only if it satisfies every invariant in §8 at the moment of the query.
+- A slot is returned only if it satisfies every invariant in §8 at the moment of the query — including INV-3 for the supplied vehicle, which is why the vehicle is part of the query.
 - The response exposes **start times only**. It does not reveal which technician or bay would be assigned — resource allocation is internal to the workshop.
 - Availability is advisory. It carries no reservation and may be stale by the time a booking is attempted.
 
@@ -188,7 +188,7 @@ Base path: `/api/v1`. All timestamps are ISO-8601 with an explicit offset.
 
 ### 10.1 `GET /availability`
 
-**Query parameters:** `dealershipId`, `serviceTypeId`, `date` (`YYYY-MM-DD`, local to the dealership)
+**Query parameters:** `dealershipId`, `serviceTypeId`, `vehicleId`, `date` (`YYYY-MM-DD`, local to the dealership). All four are required; `vehicleId` lets the query apply INV-3 (AC-22).
 
 **200 OK**
 ```json
@@ -200,6 +200,13 @@ Base path: `/api/v1`. All timestamps are ISO-8601 with an explicit offset.
 ```
 
 An empty `availableSlots` array is a valid 200 response, not an error.
+
+**Error responses**
+
+| Status | Code | Meaning |
+|---|---|---|
+| 404 | `RESOURCE_NOT_FOUND` | Unknown dealership, vehicle or service type |
+| 400 | `VALIDATION_ERROR` | Missing or malformed query parameter |
 
 ### 10.2 `POST /appointments`
 

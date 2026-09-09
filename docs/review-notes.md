@@ -27,10 +27,9 @@ recorded in the final entry of `ai-collaboration-raw.md`.
    `IDEMPOTENCY_KEY_REUSED` (invented code). Outcomes decided *before* the transaction (404/422) are
    not recorded, so their replay is re-evaluated. No purge job for expired rows. Scope and expiry:
    `TestIdempotency_*` in `internal/repository/postgres`.
-5. **Availability and INV-3** — `GET /availability` now requires `vehicleId` (human decision) so
-   every returned slot satisfies INV-1..INV-6 for that vehicle (AC-22). This is a required parameter
-   beyond `requirements.md` §10.1; amend the spec's parameter list and example, otherwise a client
-   following §10.1 literally gets `400 VALIDATION_ERROR`.
+5. **Availability and INV-3** — `GET /availability` requires `vehicleId` (human decision) so every
+   returned slot satisfies INV-1..INV-6 for that vehicle (AC-22). `requirements.md` was bumped to
+   v1.1 (FR-1, §10.1) to match; spec, OpenAPI and code now agree.
 6. **Load counting for BR-6** — `daySchedule` selects appointments whose *start* lies within the
    dealership-local calendar day (`domain.Date.Bounds`). Complete under INV-6 (no job spans midnight),
    but it is the one place a SQL predicate encodes a rule, together with `status = 'CONFIRMED'`.

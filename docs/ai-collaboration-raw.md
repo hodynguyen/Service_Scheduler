@@ -358,8 +358,9 @@ Written by the AI agent immediately after each phase. Unedited. Accuracy over to
   validates it like the other ids (400), the service refuses an empty one (VALIDATION_ERROR) and an
   unknown or foreign-dealership vehicle is 404. AC-22 ("excludes slots that would fail any
   invariant") now holds without qualification.
-- Cost: a required parameter that `requirements.md` §10.1 does not list. A client written from the
-  spec text gets 400 until the spec is amended; I did not edit `requirements.md` because it is the
-  reviewer's document, but openapi.yaml, README and review-notes state the addition.
+- Cost: a required parameter that `requirements.md` §10.1 did not list. I first left the spec alone
+  (reviewer's document); the reviewer then asked me to amend it. `requirements.md` is now v1.1:
+  FR-1 mentions the vehicle, §10.1 lists `vehicleId` and gains its own error table (404/400).
+  Spec, OpenAPI and code agree again.
 - Tests: every availability test supplies a vehicle; AC-22 also asserts that a *different* vehicle
   still sees the slots the busy vehicle loses, so the filter is per vehicle, not global.

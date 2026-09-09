@@ -43,8 +43,8 @@ paths:
         weekday, kept only if the whole job fits before closing, a qualified, free technician
         **and** bay exist at that moment, and the given vehicle has no overlapping active
         appointment (INV-1..INV-6 for that vehicle). Availability is advisory and carries no
-        reservation. `vehicleId` is required (an addition to requirements.md §10.1) because
-        AC-22 asks availability to honour every invariant and INV-3 needs the vehicle.
+        reservation. `vehicleId` is required because AC-22 asks availability to honour every
+        invariant and INV-3 needs the vehicle (requirements.md v1.1, FR-1 / §10.1).
       parameters:
         - $ref: '#/components/parameters/CorrelationID'
         - name: dealershipId
