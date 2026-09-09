@@ -352,3 +352,14 @@ Written by the AI agent immediately after each phase. Unedited. Accuracy over to
   NO_AVAILABLE_RESOURCE because the only alignment rig/technician are taken. AC-07 tests unchanged.
 - My first attempt to edit the domain test silently did not apply (the line had been changed by the
   earlier lint fix), so the "test" commit was initially incomplete; fixed with a fixup before push.
+
+## Post-review change — vehicleId required on availability   (2026-09-09 ~12:00 +07:00)
+- Human decision on review-notes item 5. `GET /availability` now requires `vehicleId`; the handler
+  validates it like the other ids (400), the service refuses an empty one (VALIDATION_ERROR) and an
+  unknown or foreign-dealership vehicle is 404. AC-22 ("excludes slots that would fail any
+  invariant") now holds without qualification.
+- Cost: a required parameter that `requirements.md` §10.1 does not list. A client written from the
+  spec text gets 400 until the spec is amended; I did not edit `requirements.md` because it is the
+  reviewer's document, but openapi.yaml, README and review-notes state the addition.
+- Tests: every availability test supplies a vehicle; AC-22 also asserts that a *different* vehicle
+  still sees the slots the busy vehicle loses, so the filter is per vehicle, not global.

@@ -40,9 +40,11 @@ paths:
       summary: List bookable start times for a service type on a date (FR-1)
       description: |
         Slots are generated every 30 minutes within the dealership's business hours for that
-        weekday, kept only if the whole job fits before closing and a qualified, free technician
-        **and** bay exist at that moment (INV-1..INV-6). Passing `vehicleId` additionally applies
-        INV-3 for that vehicle. Availability is advisory and carries no reservation.
+        weekday, kept only if the whole job fits before closing, a qualified, free technician
+        **and** bay exist at that moment, and the given vehicle has no overlapping active
+        appointment (INV-1..INV-6 for that vehicle). Availability is advisory and carries no
+        reservation. `vehicleId` is required (an addition to requirements.md §10.1) because
+        AC-22 asks availability to honour every invariant and INV-3 needs the vehicle.
       parameters:
         - $ref: '#/components/parameters/CorrelationID'
         - name: dealershipId
@@ -60,8 +62,8 @@ paths:
           schema: { type: string, format: date, example: '2030-03-04' }
         - name: vehicleId
           in: query
-          required: false
-          description: Optional. When present, slots where this vehicle already has an active appointment are excluded.
+          required: true
+          description: The vehicle the appointment is for; slots where it already has an active appointment are excluded (INV-3).
           schema: { $ref: '#/components/schemas/UUID' }
       responses:
         '200':

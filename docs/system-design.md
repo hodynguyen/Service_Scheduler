@@ -128,8 +128,9 @@ Key properties of this flow:
 ### `GET /api/v1/availability`
 
 Same building blocks, no transaction: resolve the day window in the dealership's zone → load the day
-schedule → `domain.AvailableSlots` walks 30-minute steps and keeps those where `Assign` would
-succeed and the job ends by closing. Because it reuses `Assign`, FR-1 and FR-2 cannot disagree
+schedule including the requested vehicle's confirmed intervals (`vehicleId` is required) →
+`domain.AvailableSlots` walks 30-minute steps and keeps those where `Assign` would succeed for that
+vehicle and the job ends by closing. Because it reuses `Assign`, FR-1 and FR-2 cannot disagree
 except through staleness, which the spec accepts ("advisory").
 
 ## 3. Data model
@@ -216,7 +217,7 @@ This system was designed and implemented with an AI coding agent (Claude) workin
   insert → retry), the observability wiring, and every document in this repository. Commit
   granularity and test-before-implementation ordering were also produced by the agent.
 * **Where it needed judgement calls** the specification did not make — slot granularity (30 min),
-  error precedence (vehicle before resources; past before hours), the flat error body, strict JSON
+  a required `vehicleId` on availability (added after human review so INV-3 is always applied), error precedence (vehicle before resources; past before hours), the flat error body, strict JSON
   (unknown fields rejected), 404 for malformed path ids, storing rejections under idempotency keys,
   and the retry-on-lost-race behaviour. Each is recorded, with the reasoning and the counter-argument, in
   [`ai-collaboration-raw.md`](./ai-collaboration-raw.md) so a human can overturn it deliberately.

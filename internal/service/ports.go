@@ -47,7 +47,7 @@ type BookingTx interface {
 }
 
 // ScheduleQuery selects one dealership's CONFIRMED appointments whose start
-// lies within Day, plus (optionally) those of one vehicle.
+// lies within Day, and marks those of VehicleID (empty = no vehicle filter).
 type ScheduleQuery struct {
 	DealershipID string
 	Day          domain.Interval
