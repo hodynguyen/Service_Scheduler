@@ -172,10 +172,44 @@ than reconstructed afterwards.
 
 **How I verified the result.**
 
-<!-- TODO(human): what you ran, what you read, what you found -->
-- Ran: (compose from a clean volume, `make test`, lint, specific cURL flows, CI runs)
-- Read: (which files end to end; which tests were read for content, not just names)
-- Found: (what was wrong, what was changed as a result, what was accepted as-is)
+I ran the stack from a clean volume (`docker compose down -v && up --build`) and exercised the API
+myself rather than trusting the suite. Availability for a 60-minute service on a Monday returned
+17 slots starting at 08:00 — with the workshop open 08:00–17:00 the last bookable start is 16:00,
+which is AC-23 visible from the outside. Booking 09:00 returned 201 with An Nguyen in the
+alignment rig and, notably, `customer: Mai Pham`, whom I never sent: A-6 deriving the customer
+from the vehicle works end to end. Repeating the identical request with the same `Idempotency-Key`
+returned the same appointment id rather than a second booking.
+
+The half-open interval rule is visible from the outside too. A competing vehicle at 09:30 was
+refused with `NO_AVAILABLE_RESOURCE` and `conflicting: ["BAY","TECHNICIAN"]`; the same vehicle at
+10:00 was accepted with the same technician and the same bay. Overlap blocks, adjacency does not.
+
+The check I found most convincing was one the suite asserts but does not make obvious. I booked
+the *same vehicle* into an overlapping slot for a different service type — one needing a different
+bay type and a different technician, so both resources were free — and it returned
+`VEHICLE_ALREADY_BOOKED`. That confirms INV-3 is a real scheduling constraint rather than an
+afterthought, and confirms the error precedence recorded in risk item 3: the vehicle conflict
+surfaces only when resources are available. `SERVICE_EXCEEDS_CLOSING_TIME` and
+`OUTSIDE_BUSINESS_HOURS` came back naming the actual closing time and the closed weekday.
+`make test` was green under `-race` across every package.
+
+Rather than read the migration and trust it, I read the constraints back out of the running
+database with `pg_get_constraintdef` over `pg_constraint WHERE contype = 'x'`. All three are
+present — bay, technician and vehicle — each `EXCLUDE USING gist (… WITH =, tstzrange(start_time,
+end_time, '[)') WITH &&) WHERE (status = 'CONFIRMED')`. I checked the vehicle one specifically,
+since INV-3 is the easiest of the three to omit. In `booking_tx.go` and `scheduler.go` I traced
+why the savepoint is needed — a constraint violation would otherwise abort the enclosing
+transaction and take the idempotency record with it — and what the per-dealership-day advisory
+lock does against what the constraints do: the lock orders selection so competitors decide on
+committed data, the constraints remain the guarantee.
+
+One thing I found and deliberately did not change: `appointment.customer_id` is a plain foreign
+key to `customer`, not constrained to the vehicle's owner, so A-6 is guaranteed by the service
+layer alone. That is inconsistent with INV-4/INV-5, which were deliberately made
+database-enforceable in migration 0002. A composite `(vehicle_id, customer_id)` foreign key would
+close it, at the cost of blocking a change of vehicle ownership while any appointment references
+the vehicle. An appointment should record the customer as at booking time, so I accepted the
+inconsistency rather than let referential integrity rewrite history.
 
 **What the agent decided that I did not.** The specification was silent on several points and the
 agent chose: a 30-minute availability grid; a flat error body `{code, message, conflicting?,

@@ -2,8 +2,8 @@
 
 Written by the AI agent immediately after each phase. Unedited. Accuracy over tone.
 
-Note added later, outside the per-phase entries: the file this log calls `review-notes.md` was
-renamed to `risk-areas.md`. The entries below keep the original name, as written at the time.
+Note: `review-notes.md` was renamed to `risk-areas.md` after these entries were written. The
+references below are left as they were.
 
 ## Phase 1 — Foundation   (2026-09-09 ~04:10 +07:00)
 - Decisions I made that the spec did not dictate:
