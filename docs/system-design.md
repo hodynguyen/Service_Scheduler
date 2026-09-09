@@ -227,7 +227,7 @@ This system was designed and implemented with an AI coding agent (Claude) workin
   inside docker compose (schema-URL conflict). Unit tests had not covered that path; the running
   stack exposed it, a failing test was added, then the fix. One test compared structs containing
   slices. Both are logged.
-* **What a human still has to check** — the list in [`review-notes.md`](./review-notes.md):
+* **What a human still has to check** — the list in [`risk-areas.md`](./risk-areas.md):
   the three constraints, the transaction, error precedence, idempotency semantics, DST behaviour,
   and the fact that INV-4/5 are not database-enforced.
 * **Method** — spec as the single source of truth, acceptance-criteria-named tests written and

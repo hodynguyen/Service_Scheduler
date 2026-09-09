@@ -9,7 +9,7 @@ returns a confirmed appointment. Go 1.25 · chi · pgx · PostgreSQL 16 · Prome
 * API contract: [`openapi.yaml`](openapi.yaml)
 * AI collaboration: [narrative below](#ai-collaboration-narrative), raw log
   [`docs/ai-collaboration-raw.md`](docs/ai-collaboration-raw.md), reviewer pointers
-  [`docs/review-notes.md`](docs/review-notes.md)
+  [`docs/risk-areas.md`](docs/risk-areas.md)
 
 ## Quickstart (two commands)
 

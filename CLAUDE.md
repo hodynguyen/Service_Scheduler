@@ -35,4 +35,4 @@ are referenced from tests, commits and docs.
 ## Running log
 
 After each phase append to `docs/ai-collaboration-raw.md` (blunt, specific, no flattery) and keep
-`docs/review-notes.md` current with the places a human should review most carefully.
+`docs/risk-areas.md` current: the highest-risk areas, how each was verified, and the decisions taken.
