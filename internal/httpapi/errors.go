@@ -10,6 +10,9 @@ import (
 	"github.com/hodynguyen/service-scheduler/internal/domain"
 )
 
+// retryAfterSeconds is the Retry-After value sent with CONTENTION.
+const retryAfterSeconds = "1"
+
 // errorBody is the wire form of every error response.
 type errorBody struct {
 	Code        string            `json:"code"`
@@ -25,6 +28,9 @@ func statusFor(code domain.Code) int {
 		return http.StatusConflict
 	case domain.CodeOutsideBusinessHours, domain.CodeServiceExceedsClosingTime, domain.CodeStartTimeInPast, domain.CodeIdempotencyKeyReused:
 		return http.StatusUnprocessableEntity
+	case domain.CodeContention:
+		// Retryable: the resources exist and are free, this request kept losing.
+		return http.StatusServiceUnavailable
 	case domain.CodeResourceNotFound:
 		return http.StatusNotFound
 	case domain.CodeValidationError:
@@ -40,6 +46,11 @@ func writeDomainError(w http.ResponseWriter, r *http.Request, err error) {
 		var conflicting []string
 		for _, c := range de.Conflicting {
 			conflicting = append(conflicting, string(c))
+		}
+		if de.Code == domain.CodeContention {
+			// The condition clears as soon as a competitor commits.
+			w.Header().Set("Retry-After", retryAfterSeconds)
+			slog.WarnContext(r.Context(), "booking contention", "error", err, "path", r.URL.Path)
 		}
 		writeError(w, statusFor(de.Code), string(de.Code), de.Message, conflicting, nil)
 		return

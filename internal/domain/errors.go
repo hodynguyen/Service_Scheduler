@@ -20,6 +20,10 @@ const (
 	// CodeIdempotencyKeyReused is not in §10: it covers a key replayed with a
 	// different payload, which the specification does not address.
 	CodeIdempotencyKeyReused Code = "IDEMPOTENCY_KEY_REUSED"
+	// CodeContention marks a retryable failure: the request repeatedly lost
+	// races for resources that are still free. Unlike NO_AVAILABLE_RESOURCE it
+	// asserts nothing about which resource is scarce, because nothing is.
+	CodeContention Code = "CONTENTION"
 )
 
 // ResourceKind names what could not be allocated (the `conflicting` array).
@@ -51,6 +55,13 @@ func (e *Error) Error() string {
 // NewError builds a domain error.
 func NewError(code Code, format string, args ...any) *Error {
 	return &Error{Code: code, Message: fmt.Sprintf(format, args...)}
+}
+
+// Contention builds the retryable contention error. The cause — SQLSTATE,
+// constraint name, which competitor won — belongs in logs and span attributes,
+// never in a client-facing message, so the text is fixed here.
+func Contention() *Error {
+	return NewError(CodeContention, "the request could not be scheduled due to concurrent contention; retry")
 }
 
 // NotFound reports an unknown dealership, vehicle, service type or appointment.
