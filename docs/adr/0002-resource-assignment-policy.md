@@ -14,8 +14,12 @@ so the two endpoints never disagree on whether a slot is bookable.
 
 * **Qualification first.** `domain.QualifiedTechnicians` keeps technicians holding
   `ServiceType.RequiredSkillID`; `domain.QualifiedBays` keeps bays of `RequiredBayType`. Then only
-  candidates whose confirmed intervals do not overlap the requested `[start, end)` remain. This is
-  where INV-4 and INV-5 are enforced.
+  candidates whose confirmed intervals do not overlap the requested `[start, end)` remain. This
+  filter is the **first line of defence** and the source of the precise `NO_AVAILABLE_RESOURCE`
+  message — it is not the guarantee. Since migration 0002, INV-4 and INV-5 are enforced by the
+  database through composite foreign keys on the denormalised `appointment.required_skill_id` and
+  `required_bay_type`; see ADR-0001, "INV-4 / INV-5 foreign keys and RESTRICT". A policy that
+  ignored this filter could not insert an unqualified assignment.
 * **Policy behind an interface.**
 
   ```go
