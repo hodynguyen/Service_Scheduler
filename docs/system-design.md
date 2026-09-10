@@ -80,11 +80,11 @@ sequenceDiagram
         S->>PG: SELECT idempotency_key … AND expires_at > now
         alt key seen
             PG-->>S: stored outcome
-            S-->>H: replay (same appointment or same rejection; IDEMPOTENCY_KEY_REUSED if payload differs)
+            S-->>H: replay — same appointment, or same rejection, or IDEMPOTENCY_KEY_REUSED if the payload differs
         end
     end
     S->>PG: pg_advisory_xact_lock(hash(dealership), hash(day))  — serialises same-day selection
-    loop until inserted or selection fails (budget = qualifying resources)
+    loop until inserted or selection fails (budget = max(3, qualifying resources + 1))
         S->>R: DaySchedule(dealership, local day, vehicle)
         R->>PG: technicians+skills, bays, CONFIRMED intervals of the day
         S->>D: Assign(schedule, serviceType, interval, LeastLoadedPolicy)

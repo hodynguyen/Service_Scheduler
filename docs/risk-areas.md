@@ -100,7 +100,6 @@ rather than oversights. Nothing here affects the invariants; they are accuracy a
 |---|---|---|
 | The README's traceability table claims the `domain` package covers AC-01..AC-17. It has no AC-03 and no AC-17 test and structurally cannot: the domain models neither vehicle ownership nor appointment status. Both are covered at service and schema level. | `README.md:141` | 2 min |
 | `CLAUDE.md` names the handler package `internal/http`; it was renamed to `internal/httpapi` so it stops shadowing `net/http`. | `CLAUDE.md:10` | 1 min |
-| The sequence diagram glosses the retry budget as "budget = qualifying resources"; it is `max(3, min(qualified technicians, qualified bays) + 1)`. | `docs/system-design.md:87` | 2 min |
 | Three places still say the specification does not fix the slot granularity. Since requirements v1.1, A-7 does. | `docs/adr/0003-time-modeling.md:37`, `docs/risk-areas.md:84`, `internal/domain/availability.go:6` | 5 min |
 | The raw log states that `openapi.yaml` documents `/healthz`. It documents three paths and no health endpoint. This is a present-tense claim about a file in the repository, so the "unedited log" exemption does not cover it — the correction belongs in a new dated entry, not an edit. | `docs/ai-collaboration-raw.md:247` | 3 min |
 | The raw log contradicts itself on the commit count (68 vs 63, three lines apart) and its "68 commits on `origin/main`" is stale (now 95). Same constraint: correct by appending. | `docs/ai-collaboration-raw.md:314, 317, 343` | 3 min |
