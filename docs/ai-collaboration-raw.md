@@ -384,3 +384,31 @@ references below are left as they were.
   500: if it ever fires, the domain filter has a bug and silence would be worse.
 - Tests: three schema tests written first (unqualified technician, wrong-type bay, lying about the
   requirement) — red before the migration, green after. Full suite and lint green.
+
+## Post-review change — contention gets its own code   (2026-09-10)
+- An independent consistency review (four read-only passes over the finished repository) found two
+  coupled defects in the retry path, both confirmed by the reviewer and by me before changing code.
+- **Defect A.** When the retry budget ran out while resources were still free, the service returned
+  the last race error to the client. If that race was a deadlock, `mapInsertError` had built it as
+  `NO_AVAILABLE_RESOURCE` with the message "concurrent booking contention (deadlock resolved by the
+  database)" and a nil `Conflicting`. So the client got a 409 — non-retryable — for a condition that
+  clears as soon as a competitor commits, without the `conflicting` array §10.2 requires for that
+  code, carrying a PostgreSQL detail across the API boundary. Fixed: `CONTENTION`, HTTP 503,
+  `Retry-After: 1`, fixed message from `domain.Contention()`, SQLSTATE kept in the wrapped chain and
+  on the span. requirements.md is now v1.2.
+- Populating `conflicting` instead was not viable: the transient branch is reached *because*
+  `domain.Assign` has just succeeded on fresh data, so naming a scarce resource would assert a cause
+  the code had disproved one line earlier.
+- **Defect B.** The budget extension (one extra attempt per deadlock victim, ceiling
+  `2*maxAttempts+16`) was my first deadlock fix and treated the symptom. Its constant was documented
+  nowhere; it identified victims by sniffing `NO_AVAILABLE_RESOURCE`-with-empty-`Conflicting` across
+  two packages; and its ceiling was computed from the configured floor rather than the effective
+  budget, so with 21+ qualifying resources it never fired at all — the case it existed for. Removed.
+  The per-day advisory lock (the second fix) is what actually prevents the deadlock. The budget is
+  now exactly what ADR-0001 always claimed.
+- What I got wrong originally: I shipped a fix, then shipped a better fix, and left the first one in
+  place. Two mechanisms for one problem, one of them undocumented, is worse than either alone.
+- Tests were written before the change and drive the contention branch through an in-memory
+  repository, because it cannot be provoked reliably against a real database. AC-18 and AC-19 were
+  not touched and still pass unchanged, which is the check that this did not alter behaviour when
+  resources are genuinely exhausted.

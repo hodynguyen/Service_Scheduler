@@ -64,6 +64,26 @@ contention rather than by the request.
 With the per-day advisory lock in place the retry rarely runs at all: same-day competitors select
 one after another on committed data. The budget remains as defence in depth.
 
+An earlier revision granted one extra attempt per `40P01` deadlock victim, capped at an
+undocumented `2*maxAttempts+16`. That was the *first* fix for the CI deadlocks and treated the
+symptom; the per-dealership-day lock is the second and supersedes it, because two transactions can
+no longer both be in the selection-and-insert phase for the same dealership-day, which is the only
+way the exclusion check produced a wait cycle. The extension has been removed: it identified
+victims by sniffing an error shape across two packages, its ceiling was computed from the
+configured floor rather than the effective budget (so it never fired above twenty qualifying
+resources, exactly the case it was meant to help), and a vestigial defence with an unexplained
+constant is worse than none. `40P01` still maps to `ErrLostRace` so a race is retried on fresh
+data — defence in depth for a future writer that does not take the lock.
+
+**Contention has its own code.** When the budget runs out while selection on fresh data still
+succeeds, the resources are free and the request simply never won. Folding that into
+`NO_AVAILABLE_RESOURCE` was wrong twice over: 409 tells a client not to retry a condition that
+clears as soon as a competitor commits, and §10.2 requires that code to carry a `conflicting`
+array naming the scarce resource — which the code has just disproved by selecting successfully.
+It is now `503 CONTENTION` with `Retry-After` (requirements v1.2), it names no resource, and it is
+never written to the idempotency store, so a retry with the same key is re-evaluated rather than
+replaying a verdict about timing.
+
 ### INV-4 / INV-5 foreign keys and RESTRICT
 
 Migration `0002` adds `appointment.required_skill_id` and `required_bay_type`, pinned to the

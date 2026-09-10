@@ -1,10 +1,15 @@
 # Unified Service Scheduler — Requirements Specification
 
 **Scenario A — Keyloop Technical Assessment**
-**Version:** 1.1
+**Version:** 1.2
 **Status:** Baseline for implementation
 
 **Changelog**
+- 1.2 — `503 CONTENTION` added to §10.2. A request that repeatedly lost races for resources that
+  were still free was previously reported as `409 NO_AVAILABLE_RESOURCE`: a non-retryable status for
+  a retryable condition, and a code whose contract requires a `conflicting` array the system cannot
+  supply in that case, because the candidate selection had just succeeded. Contention now has its
+  own retryable code.
 - 1.1 — `vehicleId` added to FR-1 / §10.1 so availability can honour INV-3 (AC-22); §10.1 gains its
   own error table; `422 IDEMPOTENCY_KEY_REUSED` added to §10.2 (a key replayed with a different
   payload, a case 1.0 did not address); A-7 clarified: start times are exact instants, not grid-aligned.
@@ -258,6 +263,7 @@ An empty `availableSlots` array is a valid 200 response, not an error.
 | 422 | `SERVICE_EXCEEDS_CLOSING_TIME` | Start is valid but the job would finish after closing (BR-4) |
 | 422 | `START_TIME_IN_PAST` | BR-5 |
 | 422 | `IDEMPOTENCY_KEY_REUSED` | The `Idempotency-Key` was already used with a different request body (FR-4) |
+| 503 | `CONTENTION` | The booking repeatedly lost races for resources that remain free. Retryable — the response carries `Retry-After`. Carries no `conflicting` array: no resource is scarce. Never recorded against an `Idempotency-Key`, so a retry is re-evaluated |
 | 404 | `RESOURCE_NOT_FOUND` | Unknown dealership, vehicle or service type |
 | 400 | `VALIDATION_ERROR` | Malformed payload, including unknown fields (BR-8) |
 

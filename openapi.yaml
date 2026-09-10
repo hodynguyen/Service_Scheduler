@@ -171,6 +171,22 @@ paths:
                   value: { code: SERVICE_EXCEEDS_CLOSING_TIME, message: 'service would finish at 17:30, after closing time 17:00' }
                 inPast:
                   value: { code: START_TIME_IN_PAST, message: 'start time 2026-01-01T09:00:00+07:00 is in the past' }
+        '503':
+          description: |
+            `CONTENTION` — the booking repeatedly lost races for resources that are still free.
+            Retryable; no `conflicting` array, because no resource is scarce. The outcome is not
+            stored against an `Idempotency-Key`, so retrying with the same key re-evaluates.
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema: { type: integer, example: 1 }
+            X-Correlation-ID: { $ref: '#/components/headers/XCorrelationID' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+              example:
+                code: CONTENTION
+                message: 'the request could not be scheduled due to concurrent contention; retry'
         '500': { $ref: '#/components/responses/InternalError' }
 
   /appointments/{id}:
@@ -321,6 +337,7 @@ components:
             - SERVICE_EXCEEDS_CLOSING_TIME
             - START_TIME_IN_PAST
             - IDEMPOTENCY_KEY_REUSED
+            - CONTENTION
             - RESOURCE_NOT_FOUND
             - VALIDATION_ERROR
             - NOT_FOUND

@@ -16,15 +16,21 @@ pass over the finished code; what that pass found and what changed is in the fin
    (`Book`, `assignAndInsert`) and `internal/repository/postgres/booking_tx.go` (`LockSchedulingDay`,
    `InsertAppointment`, `mapInsertError`). Lock order is idempotency key → day; the day lock only
    orders selection (CI showed exclusion-check deadlock cycles without it), the constraints remain
-   the guarantee. Savepoint + retry on `ErrLostRace` (23P01 and 40P01). The budget is
-   `max(3, min(qualified technicians, qualified bays)+1)`: the deterministic policy makes every
-   losing request select the same next candidate, so exactly one competitor is retired per round
-   and the budget is sufficient (ADR-0001). Decisions taken: a domain rejection is captured and the
-   transaction still commits, so the idempotency record is written and a replay is stable; a
-   *transient* outcome (budget exhausted while resources may still be free) is returned but not
-   recorded, so a retry re-evaluates. Verified by `TestBooking_AC18_*` (20 competitors, one
-   resource), `TestBooking_ConcurrentRequestsUseEveryFreeResourceWhenMoreThanThreeQualify` (four
-   competitors, four resources, five runs) and `TestBooking_AC19_*`, all under `-race` and on CI.
+   the guarantee. Savepoint + retry on `ErrLostRace` (23P01 and 40P01). The budget is exactly
+   `max(3, min(qualified technicians, qualified bays)+1)`, computed once from the first schedule
+   load and never extended: the deterministic policy makes every losing request select the same
+   next candidate, so exactly one competitor is retired per round (ADR-0001). An earlier revision
+   grew the budget per deadlock victim under an undocumented ceiling; that was removed once the
+   per-day lock made the deadlock unreachable through any current writer.
+   Decisions taken: a domain rejection is captured and the transaction still commits, so the
+   idempotency record is written and a replay is stable; a *transient* outcome — the budget ran out
+   while selection on fresh data still succeeds — is reported as `503 CONTENTION` with `Retry-After`
+   and is deliberately **not** recorded, so a retry with the same key re-evaluates. Verified by
+   `TestBooking_AC18_*` (20 competitors, one resource),
+   `TestBooking_ConcurrentRequestsUseEveryFreeResourceWhenMoreThanThreeQualify` (four competitors,
+   four resources, five runs), `TestBooking_AC19_*`, and the `TestBooking_Contention*` /
+   `TestBooking_BudgetIsQualifiedResourcesPlusOneWithAFloorOfThree` unit tests, which drive the
+   contention branch through an in-memory repository so it does not depend on timing.
 3. **Error precedence** — `internal/domain/assign.go` checks resource availability before the
    vehicle (INV-3), so AC-18 holds literally (identical requests → `NO_AVAILABLE_RESOURCE`) and
    `VEHICLE_ALREADY_BOOKED` appears only when resources are free (AC-07). It was vehicle-first
