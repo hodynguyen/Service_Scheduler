@@ -231,6 +231,7 @@ func TestHTTP_DomainErrorsMapToSpecStatusCodes(t *testing.T) {
 		{domain.NewError(domain.CodeServiceExceedsClosingTime, "x"), http.StatusUnprocessableEntity, nil},
 		{domain.NewError(domain.CodeStartTimeInPast, "x"), http.StatusUnprocessableEntity, nil},
 		{domain.NewError(domain.CodeIdempotencyKeyReused, "x"), http.StatusUnprocessableEntity, nil},
+		{domain.NewError(domain.CodeContention, "x"), http.StatusServiceUnavailable, nil},
 		{domain.NotFound("vehicle", vehicleID), http.StatusNotFound, nil},
 		{domain.NewError(domain.CodeValidationError, "x"), http.StatusBadRequest, nil},
 	}
@@ -410,5 +411,25 @@ func TestHTTP_ReadyzReflectsDependencyCheck(t *testing.T) {
 	rec, body := do(t, down, http.MethodGet, "/readyz", "")
 	if rec.Code != http.StatusServiceUnavailable || strings.Contains(rec.Body.String(), "db down") {
 		t.Fatalf("not-ready status = %d body %v (must not leak the cause)", rec.Code, body)
+	}
+}
+
+func TestHTTP_ContentionIs503WithRetryAfterAndNoInternals(t *testing.T) {
+	f := &fakeService{book: func(service.BookRequest) (domain.Appointment, error) {
+		return domain.Appointment{}, domain.NewError(domain.CodeContention,
+			"the request could not be scheduled due to concurrent contention; retry")
+	}}
+	rec, body := do(t, newServer(f), http.MethodPost, "/api/v1/appointments", validBody)
+	expectError(t, rec, body, http.StatusServiceUnavailable, "CONTENTION")
+	if got := rec.Header().Get("Retry-After"); got != "1" {
+		t.Fatalf("Retry-After = %q, want \"1\"", got)
+	}
+	if _, present := body["conflicting"]; present {
+		t.Fatalf("contention names no scarce resource: %v", body["conflicting"])
+	}
+	for _, banned := range []string{"deadlock", "40P01", "23P01", "sqlstate", "constraint"} {
+		if strings.Contains(strings.ToLower(rec.Body.String()), banned) {
+			t.Errorf("response body must not contain %q: %s", banned, rec.Body.String())
+		}
 	}
 }

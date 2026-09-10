@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgconn"
@@ -14,13 +15,24 @@ import (
 // the other's in-progress tuple while checking the exclusion constraint;
 // Postgres breaks the cycle by aborting one with 40P01. That transaction did
 // not do anything wrong — it lost the race — so it must retry like a 23P01.
-func TestMapInsertError_DeadlockIsALostRace(t *testing.T) {
-	err := mapInsertError(&pgconn.PgError{Code: "40P01", Message: "deadlock detected"})
+func TestMapInsertError_DeadlockIsContentionNotUnavailability(t *testing.T) {
+	err := mapInsertError(&pgconn.PgError{Code: "40P01", Message: "deadlock detected", ConstraintName: "appointment_no_bay_overlap"})
 	if !errors.Is(err, service.ErrLostRace) {
-		t.Fatalf("40P01 must be classified as a lost race, got %v", err)
+		t.Fatalf("40P01 must still be retried as a lost race, got %v", err)
 	}
-	if domain.CodeOf(err) != domain.CodeNoAvailableResource {
-		t.Fatalf("lost race must carry a domain error, got %v", err)
+	// A deadlock says nothing about which resource is scarce, so it must not
+	// masquerade as NO_AVAILABLE_RESOURCE.
+	if domain.CodeOf(err) != domain.CodeContention {
+		t.Fatalf("code = %s, want %s", domain.CodeOf(err), domain.CodeContention)
+	}
+	de, _ := domain.AsError(err)
+	if de.Conflicting != nil {
+		t.Fatalf("contention names no resource, got %v", de.Conflicting)
+	}
+	for _, banned := range []string{"deadlock", "40P01", "SQLSTATE", "appointment_no_"} {
+		if strings.Contains(strings.ToLower(de.Message), strings.ToLower(banned)) {
+			t.Errorf("client-facing message must not contain %q: %q", banned, de.Message)
+		}
 	}
 }
 
