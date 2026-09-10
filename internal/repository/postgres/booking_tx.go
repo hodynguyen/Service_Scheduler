@@ -77,7 +77,8 @@ func (b *bookingTx) InsertAppointment(ctx context.Context, a service.NewAppointm
 //     constraint name says which resource it took.
 //   - 40P01 deadlock_detected: two inserts conflicted at the same instant and
 //     each waited on the other's in-progress tuple during the exclusion check;
-//     Postgres aborted this one. Nothing is known about the winner yet, so the
+//     Postgres aborted this one. Nothing is known about the winner — it may not
+//     even have committed — so this is contention, not unavailability, and the
 //     retry re-selects on fresh data.
 func mapInsertError(err error) error {
 	var pgErr *pgconn.PgError
@@ -85,8 +86,9 @@ func mapInsertError(err error) error {
 		return fmt.Errorf("insert appointment: %w", err)
 	}
 	if pgErr.Code == "40P01" {
-		return fmt.Errorf("%w: %w", service.ErrLostRace,
-			domain.NewError(domain.CodeNoAvailableResource, "concurrent booking contention (deadlock resolved by the database)"))
+		// The SQLSTATE stays in the wrapped chain for logs and span attributes;
+		// domain.Contention supplies the client-facing text.
+		return fmt.Errorf("%w: %w (%s)", service.ErrLostRace, domain.Contention(), pgErr.Code)
 	}
 	if pgErr.Code == "23503" {
 		// INV-4/INV-5/INV-7 foreign keys: an invariant the domain should have

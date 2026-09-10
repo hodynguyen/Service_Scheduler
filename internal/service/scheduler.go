@@ -288,11 +288,14 @@ func (s *Scheduler) replay(ctx context.Context, tx BookingTx, rec *IdempotencyRe
 // losing a race is not a rejection by itself, selection is repeated on fresh
 // data. Because the policy is deterministic every loser re-selects the same
 // next candidate and each round retires at most one competitor, so the budget
-// is the number of qualifying resources, never less than maxAttempts.
+// is max(maxAttempts, qualifying resources + 1) and nothing extends it — see
+// ADR-0001 "Retry budget".
 //
-// transient is true only when the budget ran out while resources may still
-// be free (sustained contention beyond the qualified count, which needs a
-// competitor to win a race and then cancel within the same request).
+// transient is true when the budget ran out while selection on fresh data
+// still succeeds: the resources are free and this request simply never won.
+// That outcome is reported as CONTENTION (retryable) and, being a fact about
+// timing rather than about the request, is never written to the idempotency
+// store — see Book.
 func (s *Scheduler) assignAndInsert(ctx context.Context, tx BookingTx, q ScheduleQuery, st domain.ServiceType, na NewAppointment) (appt domain.Appointment, err error, transient bool) {
 	var lastRace error
 	budget := s.maxAttempts
@@ -321,11 +324,6 @@ func (s *Scheduler) assignAndInsert(ctx context.Context, tx BookingTx, q Schedul
 			return domain.Appointment{}, err, false
 		}
 		lastRace = err
-		// A deadlock victim lost no candidate to a committed competitor yet;
-		// allow one extra attempt per such event, within a hard ceiling.
-		if de, ok := domain.AsError(err); ok && len(de.Conflicting) == 0 && de.Code == domain.CodeNoAvailableResource && budget < 2*s.maxAttempts+16 {
-			budget++
-		}
 	}
 	// Budget exhausted. Decide from fresh data whether that is a durable fact
 	// (selection now fails: precise NO_AVAILABLE_RESOURCE / VEHICLE_ALREADY_BOOKED)
@@ -337,10 +335,13 @@ func (s *Scheduler) assignAndInsert(ctx context.Context, tx BookingTx, q Schedul
 	if _, err := domain.Assign(schedule, st, na.Interval, s.policy); err != nil {
 		return domain.Appointment{}, err, false
 	}
-	if de, ok := domain.AsError(lastRace); ok {
-		return domain.Appointment{}, de, true
+	// Selection still succeeds, so the resources were free and this request
+	// simply never won: contention, which the client may retry. The database
+	// detail of the last lost race goes to the trace, not to the response.
+	if lastRace != nil {
+		trace.SpanFromContext(ctx).SetAttributes(attribute.String("booking.last_race", lastRace.Error()))
 	}
-	return domain.Appointment{}, lastRace, false
+	return domain.Appointment{}, domain.Contention(), true
 }
 
 // GetAppointment implements FR-3.
