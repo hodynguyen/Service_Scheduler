@@ -412,3 +412,34 @@ references below are left as they were.
   repository, because it cannot be provoked reliably against a real database. AC-18 and AC-19 were
   not touched and still pass unchanged, which is the check that this did not alter behaviour when
   resources are genuinely exhausted.
+
+## Post-review corrections — three document/code disagreements   (2026-09-10)
+- Follow-ups from the same independent review that produced the CONTENTION change. All three were
+  cases of a document asserting something the code contradicted.
+- **ADR-0002** still said the domain candidate filter is "where INV-4 and INV-5 are enforced". False
+  since migration 0002, and it contradicted ADR-0001, the README, system-design, risk-areas and
+  CLAUDE.md. It is also the ADR whose own header points at INV-4 and INV-5, so it is the file a
+  reviewer opens for that question. Corrected: the filter is the first line of defence and the
+  source of the precise error message; the composite foreign keys are the guarantee.
+- **`InTx`** documented a READ COMMITTED isolation level it never set — the code issues a bare
+  BEGIN and inherits `default_transaction_isolation`. I fixed the comment rather than the code:
+  pinning the level would override an operator's setting, which is a behaviour change, and the
+  brief was not to change behaviour. The comment now also records why the retry path cares.
+- **Migration 0003** indexed `technician_skill (skill_id, technician_id)` for a query that does not
+  exist. I added it in an earlier turn on the strength of its own stated premise without checking
+  that premise against the code — candidate selection loads a dealership's technicians and filters
+  in `domain.QualifiedTechnicians`, because qualification is a business rule and business rules stay
+  out of SQL. Meanwhile the query that does run, `technician WHERE dealership_id = $1`, had no seek
+  path at all: both of that table's indexes lead with `id`, while the sibling bay query happened to
+  be covered by `service_bay`'s `UNIQUE (dealership_id, name)`. Fixed in 0004, not by rewriting
+  0003, because 0003 was already applied to databases and rewriting it would leave them holding an
+  index the file no longer creates. Measured honestly: at seed size (4 technicians) the planner
+  seq-scans and ignores the new index; it exists so §11's "index-supported" claim survives a
+  realistic technician count. The 0003 index was not literally unread — the planner sometimes
+  picked it for the INV-4 foreign-key check — but the primary key serves that lookup too, so it
+  was redundant rather than dead.
+- The remaining findings from the review are now listed in `risk-areas.md` under "Known open
+  items", with the cost of closing each, rather than fixed. That includes two corrections to
+  *this* file which cannot be made in place: it claims `openapi.yaml` documents `/healthz` (it does
+  not — the contract has three paths and no health endpoint), and it contradicts itself on the
+  commit count, quoting 68 and 63 three lines apart with a final total that is now stale at 95.

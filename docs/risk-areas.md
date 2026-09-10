@@ -87,3 +87,64 @@ pass over the finished code; what that pass found and what changed is in the fin
     database, `/healthz` does not. CI is green on GitHub Actions (lint, unit + integration with
     testcontainers, image build) since the per-day lock landed; the two earlier red runs and their
     causes are in the log.
+
+## Known open items
+
+Found by an independent consistency review of the finished repository (2026-09-10) and left
+unfixed deliberately. Each is recorded with what it costs to close, so the omissions are choices
+rather than oversights. Nothing here affects the invariants; they are accuracy and polish defects.
+
+### Documents that contradict the code
+
+| Item | Where | Cost |
+|---|---|---|
+| The README's traceability table claims the `domain` package covers AC-01..AC-17. It has no AC-03 and no AC-17 test and structurally cannot: the domain models neither vehicle ownership nor appointment status. Both are covered at service and schema level. | `README.md:141` | 2 min |
+| `CLAUDE.md` names the handler package `internal/http`; it was renamed to `internal/httpapi` so it stops shadowing `net/http`. | `CLAUDE.md:10` | 1 min |
+| The sequence diagram glosses the retry budget as "budget = qualifying resources"; it is `max(3, min(qualified technicians, qualified bays) + 1)`. | `docs/system-design.md:87` | 2 min |
+| Three places still say the specification does not fix the slot granularity. Since requirements v1.1, A-7 does. | `docs/adr/0003-time-modeling.md:37`, `docs/risk-areas.md:84`, `internal/domain/availability.go:6` | 5 min |
+| The raw log states that `openapi.yaml` documents `/healthz`. It documents three paths and no health endpoint. This is a present-tense claim about a file in the repository, so the "unedited log" exemption does not cover it — the correction belongs in a new dated entry, not an edit. | `docs/ai-collaboration-raw.md:247` | 3 min |
+| The raw log contradicts itself on the commit count (68 vs 63, three lines apart) and its "68 commits on `origin/main`" is stale (now 95). Same constraint: correct by appending. | `docs/ai-collaboration-raw.md:314, 317, 343` | 3 min |
+| `README.md:36` and `CLAUDE.md:12` state "no business logic in SQL" without qualification; item 6 above is the acknowledged exception. | `README.md:36`, `CLAUDE.md:12` | 2 min |
+| "Milliseconds each" for lock-serialised bookings is unbenchmarked; the log itself records that no benchmark exists. | `docs/system-design.md:204`, `docs/adr/0001…:135` | 3 min |
+| The README narrative attributes the retry-budget finding to both review passes (one found it), says "the suite asserts" a check the suite does not assert in that exact form, glosses "all seven phases" with six, and says CI runs on every push when the workflow triggers on `main` and pull requests only. | `README.md:187, 236, 166, 147` | 8 min |
+| AC-07 in the specification is worded unconditionally and is false under the settled resource-before-vehicle precedence. The spec is the only document that does not record that rule. | `docs/requirements.md:300` | 5 min |
+
+### Behaviour that no document describes
+
+| Item | Where | Cost |
+|---|---|---|
+| A panic returns a bare `500` with an empty body, because chi's `Recoverer` writes only a status. `requirements.md` §10 and `openapi.yaml` both promise every error body carries `code` and `message`. A custom recoverer closes it. | `internal/httpapi/router.go:59` | 30 min |
+| A request that trips `middleware.Timeout` can likewise emit a bare `504`, and a client-cancelled request returns `200` with an empty body (`errors.go` deliberately writes nothing once the client is gone). Neither shape is documented. | `internal/httpapi/router.go:60`, `internal/httpapi/errors.go:47` | included above |
+| `405` and `504` appear in the OpenAPI error enum but are attached to no path; `/healthz`, `/readyz` and `/metrics` are absent from the contract entirely, and `/readyz`'s `503` body matches no schema. | `openapi.yaml` | 10 min |
+| `details` is documented as a map of field name to reason, but one key is the `Idempotency-Key` header name, and a `VALIDATION_ERROR` raised in the service layer carries no `details` at all. | `openapi.yaml:216`, `internal/httpapi/handlers.go:88` | 5 min |
+
+### Durability and operations
+
+| Item | Where | Cost |
+|---|---|---|
+| `idempotency_key` grows without bound. FR-4 says keys are "retained for 24 hours"; expiry is enforced on read only, and the `expires_at` index supports a sweep that does not exist. Rows are reclaimed only when the same key recurs. | `migrations/0001:140`, `booking_tx.go` | 10 min to document, ~1 h to implement with a scheduled delete |
+| A `23503` from the INV-4/INV-5 foreign keys is classified as "a bug, not contention" and returns 500. Decertifying a technician between the schedule read and the insert is legitimate concurrency and should retry. The constraint names are already exported for exactly this. | `internal/repository/postgres/booking_tx.go` | 15 min |
+| INV-6 has no database enforcement — see item 8 above. Unchanged. | — | — |
+
+### Tests
+
+| Item | Where | Cost |
+|---|---|---|
+| `TestHTTP_AC24` is named for the acceptance criterion but stubs the service to return an empty slice, so it asserts JSON rendering, not a fully booked day. No test joins "full day" to "200 with `[]`" across the HTTP boundary. | `internal/httpapi/handlers_test.go` | 5 min |
+| `TestAssign_AC18_ResourceConflictIsReportedBeforeVehicleConflict` is single-threaded and tests precedence, not the concurrency criterion. The name should not carry AC-18, which is properly covered at service level. | `internal/domain/assign_test.go` | 2 min |
+| `TestBooking_AC09` does not isolate the wrong-bay-type failure: the only EV technician is busy at the same instant, which is why its assertion was weakened to `Conflicting[0]`. | `internal/service/scheduler_integration_test.go` | 10 min |
+| A dead assertion, `if !errors.Is(err, err)`, guards an unreachable `t.Fatal` purely to keep an import alive. | `internal/service/scheduler_integration_test.go:682` | 1 min |
+| AC-19's per-dealership scoping and 24-hour expiry are asserted against `BookingTx` directly, never through `Scheduler.Book`. | `internal/repository/postgres/idempotency_test.go` | 15 min |
+
+### Housekeeping
+
+`part1.txt` and `part2.txt` are untracked concatenations of the repository's own documents. A clone
+is clean; a zip of the working directory is not. Cost: 1 min.
+
+### Not verifiable without more work
+
+That `ROLLBACK TO SAVEPOINT` recovers a transaction from a `40P01` deadlock on PostgreSQL 16 is
+assumed by the retry path and was reasoned about, not tested; two `psql` sessions would settle it.
+The advisory-lock ordering is total up to `hashtext` injectivity — a cross-collision between a key
+string and a `"day:…"` string could in principle deadlock, at roughly 2⁻⁶⁴, surfacing as a clean
+500. The 200 ms p95 requirement has no benchmark anywhere in the repository.
