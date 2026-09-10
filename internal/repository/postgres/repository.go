@@ -305,7 +305,16 @@ func daySchedule(ctx context.Context, q querier, sq service.ScheduleQuery) (doma
 	return s, apptRows.Err()
 }
 
-// InTx runs fn in a READ COMMITTED transaction.
+// InTx runs fn in one transaction, begun without an explicit isolation level
+// so it takes the server's default_transaction_isolation (READ COMMITTED on a
+// stock PostgreSQL). The booking retry depends on those semantics: after a
+// lost race it re-reads the day schedule and must see the competitor's
+// committed row. Under REPEATABLE READ the re-read would return the same
+// snapshot, every attempt would pick the same candidate and fail identically,
+// and the booking would end in CONTENTION instead of finding a free resource.
+// Correctness is unaffected either way — the exclusion constraints do not
+// depend on the isolation level — but an operator who raises the default
+// degrades throughput under contention.
 func (r *Repository) InTx(ctx context.Context, fn func(tx service.BookingTx) error) error {
 	ctx, span := tracer.Start(ctx, "repository.Transaction")
 	defer span.End()
